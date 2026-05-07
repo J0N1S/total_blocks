@@ -42,14 +42,27 @@ class GameView @JvmOverloads constructor(
             listOf(Block(0,0), Block(1,0), Block(1,1)), // L-small
             listOf(Block(0,0), Block(1,0), Block(2,0), Block(2,1)), // L-3x2
             listOf(Block(0,0), Block(0,1), Block(0,2), Block(1,1)), // T-shape
-            listOf(Block(0,0), Block(1,0), Block(1,1), Block(2,1))  // Z-shape
+            listOf(Block(0,0), Block(1,0), Block(1,1), Block(2,1)), // Z-shape
+            // New Pieces
+            listOf(Block(0,0), Block(0,1), Block(0,2), Block(1,0), Block(1,1), Block(1,2), Block(2,0), Block(2,1), Block(2,2)), // 3x3 Square
+            listOf(Block(0,0), Block(0,1), Block(0,2), Block(1,0), Block(1,1), Block(1,2)), // 2x3 Rectangle
+            listOf(Block(0,0), Block(1,0), Block(2,0), Block(2,1), Block(2,2)) // 3x3 L-shape
         )
-        fun random() = Piece(templates.random(), 0)
+        fun random(): Piece {
+            val isOneByOne = (1..100).random() <= 5
+            val template = if (isOneByOne) {
+                templates[0] // 1x1 is the first element
+            } else {
+                templates.drop(1).random()
+            }
+            return Piece(template, 0)
+        }
     }
 
     // ── Board & Pieces ─────────────────────────────────────────────────
     private val board        = Array(BOARD_SIZE) { IntArray(BOARD_SIZE) { 0 } }
     private val currentPieces = arrayOfNulls<Piece>(PIECE_SLOTS)
+    private val nextPieces    = arrayOfNulls<Piece>(PIECE_SLOTS)
 
     // ── Score ──────────────────────────────────────────────────────────
     private var score    = 0
@@ -69,9 +82,12 @@ class GameView @JvmOverloads constructor(
     private var ringBonus      = false
 
     // ── Abilities ──────────────────────────────────────────────────────
-    private var gravityAvail   = false; private var gravityUsed   = false
-    private var tripleAvail    = false; private var tripleUsed    = false
-    private var clearAllAvail  = false; private var clearAllUsed  = false
+    private var gravityCharges = 0
+    private var tripleCharges  = 0
+    private var clearAllCharges = 0
+    private var lastGravityEarnedAt = 0
+    private var lastTripleEarnedAt  = 0
+    private var lastClearAllEarnedAt = 0
     private val abilityRects   = Array(3) { RectF() }
 
     // ── Drag ───────────────────────────────────────────────────────────
@@ -90,6 +106,7 @@ class GameView @JvmOverloads constructor(
     private var prevBoard:  Array<IntArray>? = null
     private var prevScore   = 0
     private var prevPieces: Array<Piece?>   = arrayOfNulls(PIECE_SLOTS)
+    private var prevNextPieces: Array<Piece?> = arrayOfNulls(PIECE_SLOTS)
 
     // ── Clear anim ─────────────────────────────────────────────────────
     private val clearRows = mutableSetOf<Int>()
@@ -149,6 +166,8 @@ class GameView @JvmOverloads constructor(
     private val rrRect = RectF()
 
     init {
+        // Pre-generate next pieces
+        for (i in 0 until PIECE_SLOTS) nextPieces[i] = PieceFactory.random().copy(color = PASTEL.random())
         refillPieces()
         bestScore = prefs().getInt("best", 0)
     }
@@ -343,11 +362,14 @@ class GameView @JvmOverloads constructor(
     }
 
     private fun drawAbilities(canvas: Canvas) {
-        val labels = listOf("1000", "5000", "10000")
-        val icons = listOf("▼", "≡", "✦")
-        val avail = listOf(gravityAvail, tripleAvail, clearAllAvail)
+        val icons = listOf("🧲", "🧹", "✨")
+        val labels = listOf("GRAVITY", "TRIPLE", "CLEAR")
+        val charges = listOf(gravityCharges, tripleCharges, clearAllCharges)
+
         for (i in 0..2) {
-            val r = abilityRects[i]; val on = avail[i]
+            val r = abilityRects[i]
+            val count = charges[i]
+            val on = count > 0
             bgP.color = if (on) Color.WHITE else 0x1A000000; bgP.style = Paint.Style.FILL
             canvas.drawRoundRect(r, 24f, 24f, bgP)
             if (!on) {
@@ -356,7 +378,17 @@ class GameView @JvmOverloads constructor(
             }
             iconP.color = if (on) COLOR_PRIMARY else 0x40000000; iconP.textSize = r.height() * 0.45f
             canvas.drawText(icons[i], r.centerX(), r.centerY() + iconP.textSize * 0.35f, iconP)
-            lblP.color = COLOR_ON_SURFACE_V; lblP.alpha = 150; lblP.textSize = r.height() * 0.25f
+
+            // Draw charge count badge
+            if (count > 0) {
+                val badgeR = r.height() * 0.15f
+                bgP.color = COLOR_SECONDARY
+                canvas.drawCircle(r.right, r.top, badgeR, bgP)
+                lblP.color = Color.WHITE; lblP.textSize = badgeR * 1.5f; lblP.textAlign = Paint.Align.CENTER
+                canvas.drawText(count.toString(), r.right, r.top + lblP.textSize * 0.35f, lblP)
+            }
+
+            lblP.color = COLOR_ON_SURFACE_V; lblP.alpha = 150; lblP.textSize = r.height() * 0.25f; lblP.textAlign = Paint.Align.CENTER
             canvas.drawText(labels[i], r.centerX(), r.bottom + lblP.textSize * 1.5f, lblP)
         }
     }
@@ -468,7 +500,9 @@ class GameView @JvmOverloads constructor(
 
     private fun placePiece(piece: Piece, row: Int, col: Int) {
         for (b in piece.blocks) board[row+b.row][col+b.col] = piece.color
-        score += piece.blocks.size
+        // Scoring: block points * combo level (if comboLevel > 0, else just block count)
+        val comboMultiplier = if (comboLevel > 0) comboLevel else 1
+        score += piece.blocks.size * comboMultiplier
         vibrate(30)
         clearAndCheck()
         checkAbilities()
@@ -480,9 +514,14 @@ class GameView @JvmOverloads constructor(
         val rows = (0 until BOARD_SIZE).filter { r -> (0 until BOARD_SIZE).all { c -> board[r][c] != 0 } }
         val cols = (0 until BOARD_SIZE).filter { c -> (0 until BOARD_SIZE).all { r -> board[r][c] != 0 } }
 
+        val filledCount = board.sumOf { r -> r.count { it != 0 } }
+        // Exception: if blocks < 16, don't break combo
+        val isBoardCrowded = filledCount >= 16
+
         if (rows.isEmpty() && cols.isEmpty()) {
             movesSinceClear++
-            if (movesSinceClear >= 2) breakCombo()
+            // Break combo after 3 moves if board has >= 16 blocks
+            if (isBoardCrowded && movesSinceClear >= 3) breakCombo()
             post { evalGameOver() }
             return
         }
@@ -508,6 +547,14 @@ class GameView @JvmOverloads constructor(
                     rows.forEach { r -> for (c in 0 until BOARD_SIZE) board[r][c] = 0 }
                     cols.forEach { c -> for (r in 0 until BOARD_SIZE) board[r][c] = 0 }
                     clearRows.clear(); clearCols.clear()
+
+                    // Full board clear bonus
+                    val isBoardEmpty = board.all { r -> r.all { it == 0 } }
+                    if (isBoardEmpty) {
+                        score += 500
+                        vibratePattern(longArrayOf(0, 100, 50, 100))
+                    }
+
                     clearFlash = 0f; clearRunning = false
                     invalidate()
                     post { evalGameOver() }
@@ -545,16 +592,28 @@ class GameView @JvmOverloads constructor(
     }
 
     private fun checkAbilities() {
-        if (score >= 1000  && !gravityUsed)  gravityAvail  = true
-        if (score >= 5000  && !tripleUsed)   tripleAvail   = true
-        if (score >= 10000 && !clearAllUsed) clearAllAvail = true
+        // Gravity: every 5000 points, max 2 charges
+        while (score >= lastGravityEarnedAt + 5000) {
+            lastGravityEarnedAt += 5000
+            if (gravityCharges < 2) gravityCharges++
+        }
+        // Triple: every 10000 points, max 2 charges
+        while (score >= lastTripleEarnedAt + 10000) {
+            lastTripleEarnedAt += 10000
+            if (tripleCharges < 2) tripleCharges++
+        }
+        // Clear All: every 20000 points, max 1 charge
+        while (score >= lastClearAllEarnedAt + 20000) {
+            lastClearAllEarnedAt += 20000
+            if (clearAllCharges < 1) clearAllCharges++
+        }
     }
 
     private fun activateAbility(i: Int) {
         when (i) {
-            0 -> if (gravityAvail)  { applyGravity();   gravityAvail=false;  gravityUsed=true;  vibrate(120) }
-            1 -> if (tripleAvail)   { applyTriple();    tripleAvail=false;   tripleUsed=true;   vibrate(120) }
-            2 -> if (clearAllAvail) { clearAll();       clearAllAvail=false; clearAllUsed=true; vibrate(200) }
+            0 -> if (gravityCharges > 0)  { applyGravity();   gravityCharges--;  vibrate(120) }
+            1 -> if (tripleCharges > 0)   { applyTriple();    tripleCharges--;   vibrate(120) }
+            2 -> if (clearAllCharges > 0) { clearAll();       clearAllCharges--; vibrate(200) }
         }
         updateRing(); saveBest(); post { evalGameOver() }; invalidate()
     }
@@ -587,13 +646,19 @@ class GameView @JvmOverloads constructor(
 
     private fun saveUndo() {
         prevBoard = Array(BOARD_SIZE) { board[it].copyOf() }; prevScore = score
-        for (i in 0 until PIECE_SLOTS) prevPieces[i] = currentPieces[i]
+        for (i in 0 until PIECE_SLOTS) {
+            prevPieces[i] = currentPieces[i]
+            prevNextPieces[i] = nextPieces[i]
+        }
     }
 
     private fun doUndo() {
         val pb = prevBoard ?: return
         for (r in 0 until BOARD_SIZE) board[r] = pb[r].copyOf(); score = prevScore
-        for (i in 0 until PIECE_SLOTS) currentPieces[i] = prevPieces[i]
+        for (i in 0 until PIECE_SLOTS) {
+            currentPieces[i] = prevPieces[i]
+            nextPieces[i] = prevNextPieces[i]
+        }
         prevBoard = null; breakCombo(); updateRing(); checkAbilities(); vibrate(40); invalidate()
     }
 
@@ -602,17 +667,31 @@ class GameView @JvmOverloads constructor(
             for (i in 0 until PIECE_SLOTS) currentPieces[i] = Piece(listOf(Block(0,0)), PASTEL.random())
             ringBonus = false; vibrate(80); return
         }
-        for (i in 0 until PIECE_SLOTS) if (currentPieces[i] == null) currentPieces[i] = PieceFactory.random().copy(color = PASTEL.random())
+        // Move nextPieces to currentPieces and generate new nextPieces
+        for (i in 0 until PIECE_SLOTS) {
+            if (currentPieces[i] == null) {
+                currentPieces[i] = nextPieces[i]
+                nextPieces[i] = PieceFactory.random().copy(color = PASTEL.random())
+            }
+        }
     }
 
     private fun resetGame() {
         for (r in 0 until BOARD_SIZE) board[r].fill(0)
-        for (i in 0 until PIECE_SLOTS) currentPieces[i] = null
+        for (i in 0 until PIECE_SLOTS) {
+            currentPieces[i] = null
+            nextPieces[i] = PieceFactory.random().copy(color = PASTEL.random())
+        }
         score = 0; isGameOver = false; clearRunning = false
         comboCount = 0; comboLevel = 0; movesSinceClear = 0; comboAlpha = 0f
         ringFill = 0f; ringBonus = false; prevRingLevel = 0; ringFlash = 0f
-        gravityAvail=false; gravityUsed=false; tripleAvail=false; tripleUsed=false
-        clearAllAvail=false; clearAllUsed=false; prevBoard=null
+        gravityCharges = 0; tripleCharges = 0; clearAllCharges = 0
+        lastGravityEarnedAt = 0; lastTripleEarnedAt = 0; lastClearAllEarnedAt = 0
+        prevBoard = null; prevScore = 0
+        for (i in 0 until PIECE_SLOTS) {
+            prevPieces[i] = null
+            prevNextPieces[i] = null
+        }
         refillPieces(); invalidate()
     }
 
