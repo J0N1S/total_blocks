@@ -31,6 +31,9 @@ class GameView @JvmOverloads constructor(
         val height: Int by lazy { blocks.maxOf { it.row } - blocks.minOf { it.row } + 1 }
     }
 
+    /**
+     * PieceFactory: პასუხისმგებელია ფიგურების გენერირებაზე.
+     */
     object PieceFactory {
         private val templates = listOf(
             listOf(Block(0,0)), // 1x1
@@ -48,10 +51,14 @@ class GameView @JvmOverloads constructor(
             listOf(Block(0,0), Block(0,1), Block(0,2), Block(1,0), Block(1,1), Block(1,2)), // 2x3 Rectangle
             listOf(Block(0,0), Block(1,0), Block(2,0), Block(2,1), Block(2,2)) // 3x3 L-shape
         )
+        /**
+         * აგენერირებს შემთხვევით ფიგურას.
+         * 1x1 ფიგურის გაჩენის შანსი არის მხოლოდ 5%.
+         */
         fun random(): Piece {
             val isOneByOne = (1..100).random() <= 5
             val template = if (isOneByOne) {
-                templates[0] // 1x1 is the first element
+                templates[0] // 1x1 არის პირველი ელემენტი
             } else {
                 templates.drop(1).random()
             }
@@ -116,6 +123,10 @@ class GameView @JvmOverloads constructor(
 
     // ── Game state ─────────────────────────────────────────────────────
     private var isGameOver = false
+    private var isScoreVisible = true
+    private var scoreRect = RectF()
+    private var trophyBitmap: Bitmap? = null
+    private var undoBitmap: Bitmap? = null
 
     // ── Vibrator ───────────────────────────────────────────────────────
     @Suppress("DEPRECATION")
@@ -170,6 +181,21 @@ class GameView @JvmOverloads constructor(
         for (i in 0 until PIECE_SLOTS) nextPieces[i] = PieceFactory.random().copy(color = PASTEL.random())
         refillPieces()
         bestScore = prefs().getInt("best", 0)
+
+        // Load trophy image
+        try {
+            val resId = context.resources.getIdentifier("trophy", "drawable", context.packageName)
+            if (resId != 0) {
+                trophyBitmap = BitmapFactory.decodeResource(context.resources, resId)
+            }
+
+            val undoId = context.resources.getIdentifier("undo", "drawable", context.packageName)
+            if (undoId != 0) {
+                undoBitmap = BitmapFactory.decodeResource(context.resources, undoId)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     // ── Layout ─────────────────────────────────────────────────────────
@@ -234,13 +260,34 @@ class GameView @JvmOverloads constructor(
         txtP.color = COLOR_PRIMARY; txtP.textAlign = Paint.Align.LEFT; txtP.textSize = height * 0.03f
         canvas.drawText(fmt(bestScore), pad, height * 0.115f, txtP)
 
-        // Center Brand Icon
-        iconP.color = 0xFF7EB2FF.toInt(); iconP.textSize = height * 0.04f
-        canvas.drawText("🏆", width / 2f, height * 0.10f, iconP)
+        // Center Brand Icon (Trophy)
+        val trophySize = height * 0.05f
+        val trophyX = width / 2f
+        val trophyY = height * 0.08f
+
+        val tb = trophyBitmap
+        if (tb != null) {
+            val dst = RectF(trophyX - trophySize/2, trophyY - trophySize/2, trophyX + trophySize/2, trophyY + trophySize/2)
+            canvas.drawBitmap(tb, null, dst, iconP)
+        } else {
+            iconP.color = 0xFF7EB2FF.toInt(); iconP.textSize = trophySize
+            canvas.drawText("🏆", trophyX, trophyY + iconP.textSize * 0.35f, iconP)
+        }
 
         // Main Score
+        val scoreY = boardTop * 0.75f
+        val scoreText = if (isScoreVisible) fmt(score) else "****"
         txtP.color = COLOR_ON_SURFACE; txtP.textAlign = Paint.Align.CENTER; txtP.textSize = height * 0.08f
-        canvas.drawText(fmt(score), width / 2f, boardTop * 0.75f, txtP)
+        canvas.drawText(scoreText, width / 2f, scoreY, txtP)
+
+        // Eye Icon for score visibility
+        val eyeIcon = if (isScoreVisible) "👁️" else "🙈"
+        iconP.textSize = height * 0.025f
+        val eyeX = width / 2f + txtP.measureText(scoreText) / 2f + 40f
+        canvas.drawText(eyeIcon, eyeX, scoreY - txtP.textSize * 0.2f, iconP)
+
+        // Define score clickable area
+        scoreRect.set(width/2f - 200f, scoreY - 150f, width/2f + 200f, scoreY + 50f)
     }
 
     private fun drawMenu(canvas: Canvas) {
@@ -395,11 +442,18 @@ class GameView @JvmOverloads constructor(
 
     private fun drawUndo(canvas: Canvas) {
         val r = undoRect
-        iconP.color = COLOR_PRIMARY; iconP.textSize = r.height() * 0.6f
-        canvas.drawText("↩", r.centerX(), r.centerY() + iconP.textSize * 0.2f, iconP)
-        lblP.color = COLOR_PRIMARY; lblP.textSize = r.height() * 0.25f; lblP.typeface = Typeface.DEFAULT_BOLD
-        canvas.drawText("UNDO", r.centerX(), r.bottom, lblP)
-        lblP.typeface = Typeface.DEFAULT
+        val ub = undoBitmap
+        if (ub != null) {
+            // Enlarged icon size (fills more of the area)
+            val iconSize = r.height() * 0.9f
+            val dst = RectF(r.centerX() - iconSize/2, r.centerY() - iconSize/2, r.centerX() + iconSize/2, r.centerY() + iconSize/2)
+            canvas.drawBitmap(ub, null, dst, iconP)
+        } else {
+            iconP.color = COLOR_PRIMARY; iconP.textSize = r.height() * 0.7f
+            canvas.drawText("↩", r.centerX(), r.centerY() + iconP.textSize * 0.35f, iconP)
+        }
+
+        // "UNDO" label removed as requested
     }
 
     private fun drawGameOver(canvas: Canvas) {
@@ -415,7 +469,22 @@ class GameView @JvmOverloads constructor(
 
         if (score > 0 && score >= bestScore) {
             lblP.color = COLOR_SECONDARY; lblP.typeface = Typeface.DEFAULT_BOLD
-            canvas.drawText("🏆 NEW BEST!", cx, cy+25f, lblP); lblP.typeface = Typeface.DEFAULT
+            val bestText = "NEW BEST!"
+            val tw = lblP.measureText(bestText)
+            val iconSize = height * 0.025f
+            val totalW = tw + iconSize + 15f
+            val startX = cx - totalW / 2f
+
+            val tb = trophyBitmap
+            if (tb != null) {
+                val dst = RectF(startX, cy + 25f - iconSize, startX + iconSize, cy + 25f)
+                canvas.drawBitmap(tb, null, dst, iconP)
+            } else {
+                canvas.drawText("🏆", startX + iconSize/2, cy + 25f, lblP)
+            }
+
+            canvas.drawText(bestText, startX + iconSize + 15f + tw/2, cy + 25f, lblP)
+            lblP.typeface = Typeface.DEFAULT
         }
 
         val btnR = RectF(cx-160f, cy+100f, cx+160f, cy+180f)
@@ -436,9 +505,16 @@ class GameView @JvmOverloads constructor(
         }
         when (ev.action) {
             MotionEvent.ACTION_DOWN -> {
+                if (menuRect.contains(ev.x, ev.y)) { /* Menu action */ return true }
+                if (scoreRect.contains(ev.x, ev.y)) { isScoreVisible = !isScoreVisible; invalidate(); return true }
                 if (undoRect.contains(ev.x, ev.y)) { doUndo(); return true }
                 for (i in 0..2) if (abilityRects[i].contains(ev.x, ev.y)) { activateAbility(i); return true }
-                onDown(ev.x, ev.y)
+
+                // Only allow piece dragging if touch is below the board
+                val boardBottom = boardTop + cellSize * BOARD_SIZE
+                if (ev.y > boardBottom) {
+                    onDown(ev.x, ev.y)
+                }
             }
             MotionEvent.ACTION_MOVE -> onMove(ev.x, ev.y)
             MotionEvent.ACTION_UP   -> onUp()
@@ -490,55 +566,76 @@ class GameView @JvmOverloads constructor(
         return true
     }
 
+    /**
+     * ამოწმებს, დასრულდა თუ არა თამაში.
+     * თამაში არ სრულდება, თუ მოთამაშეს დარჩენილი აქვს სუპერ-მოქმედებები.
+     */
     private fun isGameOverNow(): Boolean {
+        // თუ მოთამაშეს აქვს დარჩენილი სუპერ-მოქმედებები, თამაში არ სრულდება
+        if (gravityCharges > 0 || tripleCharges > 0 || clearAllCharges > 0) return false
+
         val active = currentPieces.filterNotNull()
         if (active.isEmpty()) return false
+
+        // ამოწმებს, არის თუ არა ადგილი რომელიმე ფიგურისთვის
         return active.none { p ->
             (0 until BOARD_SIZE).any { r -> (0 until BOARD_SIZE).any { c -> canPlacePiece(p, r, c) } }
         }
     }
 
+    /**
+     * ფიგურის დაფაზე განთავსება.
+     * ქულების დათვლა: ბლოკების რაოდენობა მრავლდება მიმდინარე კომბოზე.
+     */
     private fun placePiece(piece: Piece, row: Int, col: Int) {
         for (b in piece.blocks) board[row+b.row][col+b.col] = piece.color
-        // Scoring: block points * combo level (if comboLevel > 0, else just block count)
+
+        // ქულების დათვლა: ბლოკების რაოდენობა * კომბოს დონე
         val comboMultiplier = if (comboLevel > 0) comboLevel else 1
         score += piece.blocks.size * comboMultiplier
+
         vibrate(30)
-        clearAndCheck()
-        checkAbilities()
+        clearAndCheck() // ხაზების შემოწმება და წაშლა
+        checkAbilities() // სუპერ-მოქმედებების შემოწმება
         updateRing()
         saveBest()
     }
 
+    /**
+     * ამოწმებს შევსებულ ხაზებს და ასუფთავებს მათ.
+     * მართავს კომბოს ლოგიკას და ბონუსებს.
+     */
     private fun clearAndCheck() {
         val rows = (0 until BOARD_SIZE).filter { r -> (0 until BOARD_SIZE).all { c -> board[r][c] != 0 } }
         val cols = (0 until BOARD_SIZE).filter { c -> (0 until BOARD_SIZE).all { r -> board[r][c] != 0 } }
 
         val filledCount = board.sumOf { r -> r.count { it != 0 } }
-        // Exception: if blocks < 16, don't break combo
+        // თუ დაფაზე 16 ბლოკზე ნაკლებია, კომბო არ წყდება (გამონაკლისი)
         val isBoardCrowded = filledCount >= 16
 
         if (rows.isEmpty() && cols.isEmpty()) {
             movesSinceClear++
-            // Break combo after 3 moves if board has >= 16 blocks
-            if (isBoardCrowded && movesSinceClear >= 3) breakCombo()
+            // კომბო წყდება 2 უშედეგო სვლის შემდეგ, თუ დაფა საკმარისად შევსებულია
+            if (isBoardCrowded && movesSinceClear >= 2) breakCombo()
             post { evalGameOver() }
             return
         }
 
+        // კომბოს გაზრდა (მაქსიმუმ 100)
         movesSinceClear = 0
         comboCount++
-        comboLevel = comboCount
-        // showComboBadge() // Not needed for permanent display, but we can keep for animation logic if needed
+        comboLevel = comboCount.coerceAtMost(100)
 
         if (comboCount >= 2) vibratePattern(longArrayOf(0, 40, 40, 80)) else vibrate(60)
 
+        // ქულების დამატება ხაზების წაშლისთვის
         score += (rows.size + cols.size) * BOARD_SIZE * comboLevel
         saveBest(); checkAbilities(); updateRing()
 
         clearRows.addAll(rows); clearCols.addAll(cols)
         clearRunning = true
 
+        // წაშლის ანიმაცია
         ValueAnimator.ofFloat(0f, 1f, 0f).apply {
             duration = 400
             addUpdateListener { clearFlash = it.animatedValue as Float; invalidate() }
@@ -548,7 +645,7 @@ class GameView @JvmOverloads constructor(
                     cols.forEach { c -> for (r in 0 until BOARD_SIZE) board[r][c] = 0 }
                     clearRows.clear(); clearCols.clear()
 
-                    // Full board clear bonus
+                    // ბონუსი დაფის სრულად გასუფთავებისთვის (+500 ქულა)
                     val isBoardEmpty = board.all { r -> r.all { it == 0 } }
                     if (isBoardEmpty) {
                         score += 500
@@ -591,18 +688,24 @@ class GameView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * სუპერ-მოქმედებების დაგროვების ლოგიკა.
+     * გრავიტაცია: ყოველ 5000 ქულაზე (მაქს. 2).
+     * ხაზების წაშლა: ყოველ 10000 ქულაზე (მაქს. 2).
+     * სრული გასუფთავება: ყოველ 20000 ქულაზე (მაქს. 1).
+     */
     private fun checkAbilities() {
-        // Gravity: every 5000 points, max 2 charges
+        // გრავიტაცია
         while (score >= lastGravityEarnedAt + 5000) {
             lastGravityEarnedAt += 5000
             if (gravityCharges < 2) gravityCharges++
         }
-        // Triple: every 10000 points, max 2 charges
+        // ხაზების წაშლა (Triple)
         while (score >= lastTripleEarnedAt + 10000) {
             lastTripleEarnedAt += 10000
             if (tripleCharges < 2) tripleCharges++
         }
-        // Clear All: every 20000 points, max 1 charge
+        // სრული გასუფთავება
         while (score >= lastClearAllEarnedAt + 20000) {
             lastClearAllEarnedAt += 20000
             if (clearAllCharges < 1) clearAllCharges++
@@ -652,14 +755,26 @@ class GameView @JvmOverloads constructor(
         }
     }
 
+    /**
+     * უკან დაბრუნების (Undo) ფუნქცია.
+     * აბრუნებს დაფას, ქულებს და ფიგურებს (მომდევნო ფიგურების ჩათვლით).
+     */
     private fun doUndo() {
         val pb = prevBoard ?: return
         for (r in 0 until BOARD_SIZE) board[r] = pb[r].copyOf(); score = prevScore
+
+        // აბრუნებს როგორც მიმდინარე, ისე მომდევნო ფიგურებს
         for (i in 0 until PIECE_SLOTS) {
             currentPieces[i] = prevPieces[i]
             nextPieces[i] = prevNextPieces[i]
         }
-        prevBoard = null; breakCombo(); updateRing(); checkAbilities(); vibrate(40); invalidate()
+
+        prevBoard = null
+        breakCombo()
+        updateRing()
+        checkAbilities()
+        vibrate(40)
+        invalidate()
     }
 
     private fun refillPieces() {
