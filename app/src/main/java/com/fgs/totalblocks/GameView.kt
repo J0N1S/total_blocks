@@ -127,6 +127,8 @@ class GameView @JvmOverloads constructor(
     private var scoreRect = RectF()
     private var trophyBitmap: Bitmap? = null
     private var undoBitmap: Bitmap? = null
+    private var hideBitmap: Bitmap? = null
+    private var menuBitmap: Bitmap? = null
 
     // ── Vibrator ───────────────────────────────────────────────────────
     @Suppress("DEPRECATION")
@@ -193,6 +195,16 @@ class GameView @JvmOverloads constructor(
             if (undoId != 0) {
                 undoBitmap = BitmapFactory.decodeResource(context.resources, undoId)
             }
+
+            val hideId = context.resources.getIdentifier("hide", "drawable", context.packageName)
+            if (hideId != 0) {
+                hideBitmap = BitmapFactory.decodeResource(context.resources, hideId)
+            }
+
+            val menuId = context.resources.getIdentifier("menu", "drawable", context.packageName)
+            if (menuId != 0) {
+                menuBitmap = BitmapFactory.decodeResource(context.resources, menuId)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -254,8 +266,11 @@ class GameView @JvmOverloads constructor(
 
     private fun drawHUD(canvas: Canvas) {
         val pad = width * 0.08f
+        val isDarkMode = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val textColor = if (isDarkMode) Color.WHITE else Color.BLACK
+
         // Top Score
-        lblP.color = COLOR_ON_SURFACE_V; lblP.alpha = 180; lblP.textAlign = Paint.Align.LEFT
+        lblP.color = textColor; lblP.alpha = 255; lblP.textAlign = Paint.Align.LEFT
         canvas.drawText("TOP", pad, height * 0.08f, lblP)
         txtP.color = COLOR_PRIMARY; txtP.textAlign = Paint.Align.LEFT; txtP.textSize = height * 0.03f
         canvas.drawText(fmt(bestScore), pad, height * 0.115f, txtP)
@@ -266,6 +281,7 @@ class GameView @JvmOverloads constructor(
         val trophyY = height * 0.08f
 
         val tb = trophyBitmap
+        iconP.alpha = 255 // Ensure full brightness
         if (tb != null) {
             val dst = RectF(trophyX - trophySize/2, trophyY - trophySize/2, trophyX + trophySize/2, trophyY + trophySize/2)
             canvas.drawBitmap(tb, null, dst, iconP)
@@ -276,24 +292,36 @@ class GameView @JvmOverloads constructor(
 
         // Main Score
         val scoreY = boardTop * 0.75f
-        val scoreText = if (isScoreVisible) fmt(score) else "****"
-        txtP.color = COLOR_ON_SURFACE; txtP.textAlign = Paint.Align.CENTER; txtP.textSize = height * 0.08f
-        canvas.drawText(scoreText, width / 2f, scoreY, txtP)
+        txtP.textSize = height * 0.08f
+        txtP.color = textColor
+        txtP.textAlign = Paint.Align.CENTER
 
-        // Eye Icon for score visibility
-        val eyeIcon = if (isScoreVisible) "👁️" else "🙈"
-        iconP.textSize = height * 0.025f
-        val eyeX = width / 2f + txtP.measureText(scoreText) / 2f + 40f
-        canvas.drawText(eyeIcon, eyeX, scoreY - txtP.textSize * 0.2f, iconP)
+        if (isScoreVisible) {
+            canvas.drawText(fmt(score), width / 2f, scoreY, txtP)
+        } else {
+            val hb = hideBitmap
+            if (hb != null) {
+                val iconSize = txtP.textSize // Same size as score text
+                // Adjusting Y to center the icon on the text baseline
+                val dst = RectF(width/2f - iconSize/2, scoreY - iconSize*0.75f, width/2f + iconSize/2, scoreY + iconSize*0.25f)
+                canvas.drawBitmap(hb, null, dst, iconP)
+            }
+        }
 
         // Define score clickable area
-        scoreRect.set(width/2f - 200f, scoreY - 150f, width/2f + 200f, scoreY + 50f)
+        scoreRect.set(width/2f - 250f, scoreY - 200f, width/2f + 250f, scoreY + 100f)
     }
 
     private fun drawMenu(canvas: Canvas) {
-        bgP.color = COLOR_SURFACE_CON; canvas.drawRoundRect(menuRect, menuRect.width()/2, menuRect.width()/2, bgP)
-        iconP.color = COLOR_ON_SURFACE_V; iconP.textSize = menuRect.height() * 0.6f
-        canvas.drawText("≡", menuRect.centerX(), menuRect.centerY() + iconP.textSize * 0.35f, iconP)
+        val mb = menuBitmap
+        if (mb != null) {
+            iconP.alpha = 255
+            canvas.drawBitmap(mb, null, menuRect, iconP)
+        } else {
+            bgP.color = COLOR_SURFACE_CON; canvas.drawRoundRect(menuRect, menuRect.width()/2, menuRect.width()/2, bgP)
+            iconP.color = COLOR_ON_SURFACE_V; iconP.textSize = menuRect.height() * 0.6f
+            canvas.drawText("☰", menuRect.centerX(), menuRect.centerY() + iconP.textSize * 0.35f, iconP)
+        }
     }
 
     private fun drawCombo(canvas: Canvas) {
@@ -412,6 +440,8 @@ class GameView @JvmOverloads constructor(
         val icons = listOf("🧲", "🧹", "✨")
         val labels = listOf("GRAVITY", "TRIPLE", "CLEAR")
         val charges = listOf(gravityCharges, tripleCharges, clearAllCharges)
+        val isDarkMode = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val labelColor = if (isDarkMode) Color.WHITE else COLOR_ON_SURFACE_V
 
         for (i in 0..2) {
             val r = abilityRects[i]
@@ -423,6 +453,7 @@ class GameView @JvmOverloads constructor(
                 bgP.color = 0x20000000; bgP.style = Paint.Style.STROKE; bgP.strokeWidth = 2f
                 canvas.drawRoundRect(r, 24f, 24f, bgP); bgP.style = Paint.Style.FILL
             }
+            iconP.alpha = 255 // Ensure full brightness
             iconP.color = if (on) COLOR_PRIMARY else 0x40000000; iconP.textSize = r.height() * 0.45f
             canvas.drawText(icons[i], r.centerX(), r.centerY() + iconP.textSize * 0.35f, iconP)
 
@@ -435,7 +466,7 @@ class GameView @JvmOverloads constructor(
                 canvas.drawText(count.toString(), r.right, r.top + lblP.textSize * 0.35f, lblP)
             }
 
-            lblP.color = COLOR_ON_SURFACE_V; lblP.alpha = 150; lblP.textSize = r.height() * 0.25f; lblP.textAlign = Paint.Align.CENTER
+            lblP.color = labelColor; lblP.alpha = 255; lblP.textSize = r.height() * 0.25f; lblP.textAlign = Paint.Align.CENTER
             canvas.drawText(labels[i], r.centerX(), r.bottom + lblP.textSize * 1.5f, lblP)
         }
     }
@@ -443,6 +474,7 @@ class GameView @JvmOverloads constructor(
     private fun drawUndo(canvas: Canvas) {
         val r = undoRect
         val ub = undoBitmap
+        iconP.alpha = 255 // Ensure full brightness
         if (ub != null) {
             // Enlarged icon size (fills more of the area)
             val iconSize = r.height() * 0.9f
