@@ -11,8 +11,8 @@ import android.view.MotionEvent
 import android.view.View
 
 /**
- * GameView: A Block Puzzle Game with a modern Material Design 3 aesthetic.
- * Final version with requested UI adjustments and logic changes.
+ * GameView: Modified Version v5.
+ * Fixed vibration toggle persistence and thread safety.
  */
 class GameView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null
@@ -21,10 +21,24 @@ class GameView @JvmOverloads constructor(
     companion object {
         const val BOARD_SIZE    = 8
         const val PIECE_SLOTS   = 3
-        const val RING_INTERVAL = 1000 // Changed to 1000 as requested
+        const val RING_INTERVAL = 1000
+        const val GRAVITY_STEP   = 1000
+        const val TRIPLE_STEP    = 5000
+        const val CLEAR_ALL_STEP = 10000
     }
 
-    // ── Data Models ────────────────────────────────────────────────────
+    var onMenuClicked: (() -> Unit)? = null
+
+    // Use @Volatile and ensure thread-safe access from WebView
+    @Volatile
+    var isVibrationEnabled: Boolean = true
+        set(value) {
+            if (field != value) {
+                field = value
+                prefs().edit().putBoolean("vibration_enabled", value).apply()
+            }
+        }
+
     data class Block(val row: Int, val col: Int)
     data class Piece(val blocks: List<Block>, val color: Int) {
         val width: Int  by lazy { blocks.maxOf { it.col } - blocks.minOf { it.col } + 1 }
@@ -33,7 +47,6 @@ class GameView @JvmOverloads constructor(
 
     object PieceFactory {
         private val templates = listOf(
-            listOf(Block(0,0)), // 1x1 (Index 0)
             listOf(Block(0,0), Block(0,1)), // 2x1
             listOf(Block(0,0), Block(1,0)), // 1x2
             listOf(Block(0,0), Block(0,1), Block(0,2)), // 3x1
@@ -45,41 +58,51 @@ class GameView @JvmOverloads constructor(
             listOf(Block(0,0), Block(1,0), Block(1,1), Block(2,1)), // Z-shape
             listOf(Block(0,0), Block(0,1), Block(0,2), Block(1,0), Block(1,1), Block(1,2), Block(2,0), Block(2,1), Block(2,2)), // 3x3 Square
             listOf(Block(0,0), Block(0,1), Block(0,2), Block(1,0), Block(1,1), Block(1,2)), // 2x3 Rectangle
-            listOf(Block(0,0), Block(1,0), Block(2,0), Block(2,1), Block(2,2)) // 3x3 L-shape
+            listOf(Block(0,0), Block(1,0), Block(2,0), Block(2,1), Block(2,2)), // 3x3 L-shape
+            listOf(Block(0,0), Block(0,1), Block(0,2), Block(0,3)), // 1x4
+            listOf(Block(0,0), Block(1,0), Block(2,0), Block(3,0)), // 4x1
+            listOf(Block(0,0), Block(0,1), Block(0,2), Block(0,3), Block(0,4)), // 1x5
+            listOf(Block(0,0), Block(1,0), Block(2,0), Block(3,0), Block(4,0))  // 5x1
         )
 
-        /**
-         * Generates a random piece.
-         * 1x1 is now disabled here as it's only granted via Ring Bonus.
-         */
-        fun random(): Piece {
-            // templates.drop(1) ensures 1x1 (index 0) is never picked randomly
-            val template = templates.drop(1).random()
-            return Piece(template, 0)
+        fun random(): Piece = Piece(templates.random(), 0)
+        fun getBonusPiece(): Piece = Piece(templates[0], 0)
+
+        fun smartRandom(board: Array<IntArray>): Piece {
+            val shuffled = templates.shuffled()
+            for (template in shuffled) {
+                val p = Piece(template, 0)
+                for (r in 0..BOARD_SIZE - p.height) {
+                    for (c in 0..BOARD_SIZE - p.width) {
+                        if (canFit(p, r, c, board)) return p
+                    }
+                }
+            }
+            return random()
         }
 
-        fun getOneByOne(): Piece = Piece(templates[0], 0)
+        private fun canFit(p: Piece, row: Int, col: Int, board: Array<IntArray>): Boolean {
+            for (b in p.blocks) {
+                if (board[row + b.row][col + b.col] != 0) return false
+            }
+            return true
+        }
     }
 
-    // ── Board & Pieces ─────────────────────────────────────────────────
     private val board        = Array(BOARD_SIZE) { IntArray(BOARD_SIZE) { 0 } }
     private val currentPieces = arrayOfNulls<Piece>(PIECE_SLOTS)
     private val nextPieces    = arrayOfNulls<Piece>(PIECE_SLOTS)
 
-    // ── Score & Combo ──────────────────────────────────────────────────
     private var score    = 0
     private var bestScore = 0
-    private var comboCount = 0
     private var comboLevel = 0
-    private var movesSinceClear = 0
+    private var movesSinceLastClear = 0
 
-    // ── Ring ───────────────────────────────────────────────────────────
     private var ringFill       = 0f
     private var prevRingLevel  = 0
     private var ringFlash      = 0f
     private var ringBonus      = false
 
-    // ── Abilities ──────────────────────────────────────────────────────
     private var gravityCharges = 0
     private var tripleCharges  = 0
     private var clearAllCharges = 0
@@ -88,13 +111,11 @@ class GameView @JvmOverloads constructor(
     private var lastClearAllEarnedAt = 0
     private val abilityRects   = Array(3) { RectF() }
 
-    // ── Drag ───────────────────────────────────────────────────────────
     private var draggingIdx = -1
     private var dragX = 0f; private var dragY = 0f
     private var ghostRow = -1; private var ghostCol = -1
     private var canPlace = false
 
-    // ── Layout ─────────────────────────────────────────────────────────
     private var boardLeft = 0f; private var boardTop  = 0f
     private var cellSize  = 0f; private var previewCS = 0f
     private var pieceAreaCY = 0f
@@ -102,19 +123,16 @@ class GameView @JvmOverloads constructor(
     private val scoreRect = RectF()
     private val topBarRect = RectF()
 
-    // ── Undo ───────────────────────────────────────────────────────────
     private var prevBoard:  Array<IntArray>? = null
     private var prevScore   = 0
     private var prevPieces: Array<Piece?>   = arrayOfNulls(PIECE_SLOTS)
     private var prevNextPieces: Array<Piece?> = arrayOfNulls(PIECE_SLOTS)
 
-    // ── Clear anim ─────────────────────────────────────────────────────
     private val clearRows = mutableSetOf<Int>()
     private val clearCols = mutableSetOf<Int>()
     private var clearFlash    = 0f
     private var clearRunning  = false
 
-    // ── Game state ─────────────────────────────────────────────────────
     private var isGameOver = false
     private var isScoreVisible = true
     private var flagBitmap: Bitmap? = null
@@ -122,27 +140,27 @@ class GameView @JvmOverloads constructor(
     private var hideBitmap: Bitmap? = null
     private var menuBitmap: Bitmap? = null
     private var cleanBitmap: Bitmap? = null
+    private var gravityBitmap: Bitmap? = null
+    private var thunderBitmap: Bitmap? = null
 
-    // ── Vibrator ───────────────────────────────────────────────────────
     private val vibrator: Vibrator? = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
             (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager).defaultVibrator
         else context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     }.getOrNull()
 
-    // ── Colors ─────────────────────────────────────────────────────────
     private val COLOR_PRIMARY     = 0xFF215FA6.toInt()
     private val COLOR_SECONDARY   = 0xFF336857.toInt()
     private val COLOR_SURFACE_CON = 0xFFEDEEEF.toInt()
     private val COLOR_ON_SURFACE  = 0xFF191C1D.toInt()
     private val COLOR_ON_SURFACE_V = 0xFF424751.toInt()
     private val COLOR_RING_TRACK  = 0x15000000
-    private val COLOR_COMBO_BG    = 0x4DFFDAD6.toInt()
+    private val COLOR_COMBO_BG    = 0xCCFFDAD6.toInt()
     private val COLOR_COMBO_FG    = 0xFF69333A.toInt()
+    private val COLOR_ABILITY_FILL = 0x33215FA6.toInt()
 
     private val PASTEL = listOf(0xFF0014E0.toInt(), 0xFFFF3636.toInt(), 0xFFFFA536.toInt(), 0xFF0FBA00.toInt(), 0xFF2FA4D7.toInt(), 0xFFE76F2E.toInt())
 
-    // ── Pre-allocated Paints & Objects ─────────────────────────────────
     private val bgP     = Paint()
     private val cellP   = Paint(Paint.ANTI_ALIAS_FLAG)
     private val blockP  = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -150,7 +168,7 @@ class GameView @JvmOverloads constructor(
     private val shadowP = Paint(Paint.ANTI_ALIAS_FLAG)
     private val shineP  = Paint(Paint.ANTI_ALIAS_FLAG)
     private val ringP   = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeWidth = 40f // x4 thickness
+        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeWidth = 40f
     }
     private val txtP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
@@ -170,6 +188,8 @@ class GameView @JvmOverloads constructor(
         for (i in 0 until PIECE_SLOTS) nextPieces[i] = PieceFactory.random().copy(color = PASTEL.random())
         refillPieces()
         bestScore = prefs().getInt("best", 0)
+        // Load vibration state directly from prefs in init
+        isVibrationEnabled = prefs().getBoolean("vibration_enabled", true)
         loadBitmaps()
     }
 
@@ -181,31 +201,31 @@ class GameView @JvmOverloads constructor(
                 val id = res.getIdentifier(name, "drawable", pkg)
                 return if (id != 0) BitmapFactory.decodeResource(res, id) else null
             }
-            flagBitmap  = load("flag") // New flag logo
-            undoBitmap  = load("undo")
-            hideBitmap  = load("hide")
-            menuBitmap  = load("menu")
-            cleanBitmap = load("clean")
+            flagBitmap    = load("flag")
+            undoBitmap    = load("undo")
+            hideBitmap    = load("hide")
+            menuBitmap    = load("menu")
+            cleanBitmap   = load("clean")
+            gravityBitmap = load("gravity")
+            thunderBitmap = load("thunder")
         } catch (e: Exception) { e.printStackTrace() }
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         val pad = w * 0.08f
         cellSize  = (w - pad * 2) / BOARD_SIZE
-        previewCS = cellSize * 0.65f
+        previewCS = cellSize * 0.45f
         boardLeft = pad
-        boardTop  = h * 0.28f
+        boardTop  = h * 0.35f
 
         val boardBottom = boardTop + cellSize * BOARD_SIZE
         pieceAreaCY = boardBottom + (h - boardBottom) * 0.25f
 
-        // Top Bar Layout
-        val topY = h * 0.08f
-        val topH = h * 0.05f
+        val topY = h * 0.10f
+        val topH = h * 0.04f
         topBarRect.set(pad, topY, w - pad, topY + topH)
         menuRect.set(w - pad - topH, topY, w - pad, topY + topH)
 
-        // Abilities and Undo
         val iconSize = w * 0.12f
         val startX = w * 0.10f
         val gap = w * 0.18f
@@ -218,7 +238,6 @@ class GameView @JvmOverloads constructor(
         lblP.textSize = h * 0.018f
         iconP.textSize = iconSize * 0.5f
 
-        // Ring rect (x4 thickness means we need more padding)
         val m = 20f
         ringRect.set(boardLeft - m, boardTop - m, boardLeft + cellSize*BOARD_SIZE + m, boardTop + cellSize*BOARD_SIZE + m)
     }
@@ -236,7 +255,10 @@ class GameView @JvmOverloads constructor(
     }
 
     private fun drawBg(c: Canvas) {
-        bgP.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), 0xFFF0F4F8.toInt(), Color.WHITE, Shader.TileMode.CLAMP)
+        val isDarkMode = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val color1 = if (isDarkMode) 0xFF121212.toInt() else 0xFFF0F4F8.toInt()
+        val color2 = if (isDarkMode) 0xFF1E1E1E.toInt() else Color.WHITE
+        bgP.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), color1, color2, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgP)
         bgP.shader = null
     }
@@ -245,42 +267,32 @@ class GameView @JvmOverloads constructor(
         val isDarkMode = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
         val textColor = if (isDarkMode) Color.WHITE else Color.BLACK
 
-        // Top Bar: Flag + TOP SCORE + Menu
-        val iconSize = topBarRect.height()
+        val iconSize = topBarRect.height() * 0.8f
         flagBitmap?.let {
-            tempRect.set(topBarRect.left, topBarRect.top, topBarRect.left + iconSize, topBarRect.bottom)
+            tempRect.set(topBarRect.left, topBarRect.centerY() - iconSize/2, topBarRect.left + iconSize, topBarRect.centerY() + iconSize/2)
             canvas.drawBitmap(it, null, tempRect, iconP)
         }
 
-        lblP.color = textColor; lblP.textAlign = Paint.Align.LEFT; lblP.textSize = iconSize * 0.4f; lblP.typeface = Typeface.DEFAULT_BOLD
-        canvas.drawText("TOP SCORE", topBarRect.left + iconSize + 15f, topBarRect.centerY() - 5f, lblP)
+        txtP.color = COLOR_PRIMARY; txtP.textAlign = Paint.Align.LEFT; txtP.textSize = height * 0.018f
+        canvas.drawText(scoreNoFmt(bestScore), topBarRect.left + iconSize + 15f, topBarRect.centerY() + txtP.textSize * 0.35f, txtP)
 
-        txtP.color = COLOR_PRIMARY; txtP.textAlign = Paint.Align.LEFT; txtP.textSize = iconSize * 0.6f
-        canvas.drawText(scoreNoFmt(bestScore), topBarRect.left + iconSize + 15f, topBarRect.centerY() + iconSize * 0.4f, txtP)
-
-        // Menu
         menuBitmap?.let {
             iconP.alpha = 255
             canvas.drawBitmap(it, null, menuRect, iconP)
-        } ?: run {
-            bgP.color = COLOR_SURFACE_CON; canvas.drawRoundRect(menuRect, menuRect.width()/2, menuRect.width()/2, bgP)
-            iconP.color = COLOR_ON_SURFACE_V; iconP.textSize = menuRect.height() * 0.6f
-            canvas.drawText("☰", menuRect.centerX(), menuRect.centerY() + iconP.textSize * 0.35f, iconP)
         }
 
-        // Main Score
         val scoreY = boardTop * 0.75f
-        txtP.textSize = height * 0.08f; txtP.color = textColor; txtP.textAlign = Paint.Align.CENTER
+        txtP.textSize = height * 0.055f; txtP.color = textColor; txtP.textAlign = Paint.Align.CENTER
         if (isScoreVisible) {
             canvas.drawText(scoreNoFmt(score), width / 2f, scoreY, txtP)
         } else {
             hideBitmap?.let {
-                val hSize = txtP.textSize
+                val hSize = txtP.textSize * 0.6f
                 tempRect.set(width/2f - hSize/2, scoreY - hSize*0.75f, width/2f + hSize/2, scoreY + hSize*0.25f)
                 canvas.drawBitmap(it, null, tempRect, iconP)
             }
         }
-        scoreRect.set(width/2f - 250f, scoreY - 200f, width/2f + 250f, scoreY + 100f)
+        scoreRect.set(width/2f - 200f, scoreY - 150f, width/2f + 200f, scoreY + 80f)
 
         drawCombo(canvas)
     }
@@ -288,13 +300,20 @@ class GameView @JvmOverloads constructor(
     private fun drawCombo(canvas: Canvas) {
         if (comboLevel < 1) return
         val cx = width / 2f; val cy = boardTop * 0.88f
-        val text = "⚡ COMBO x$comboLevel"
-        lblP.textSize = height * 0.022f; lblP.textAlign = Paint.Align.CENTER; lblP.typeface = Typeface.DEFAULT_BOLD
+        lblP.textSize = height * 0.018f; lblP.textAlign = Paint.Align.CENTER; lblP.typeface = Typeface.DEFAULT_BOLD
+        val text = "COMBO x$comboLevel"
         val tw = lblP.measureText(text)
-        val bh = height * 0.045f; val bw = tw + 60f
+        val bh = height * 0.035f; val iconW = bh * 0.55f
+        val bw = tw + iconW + 60f
         tempRect.set(cx - bw/2, cy - bh/2, cx + bw/2, cy + bh/2)
         bgP.color = COLOR_COMBO_BG; canvas.drawRoundRect(tempRect, bh/2, bh/2, bgP)
-        lblP.color = COLOR_COMBO_FG; canvas.drawText(text, cx, cy + lblP.textSize * 0.35f, lblP)
+
+        thunderBitmap?.let {
+            val dst = RectF(cx - bw/2 + 20f, cy - iconW/2, cx - bw/2 + 20f + iconW, cy + iconW/2)
+            canvas.drawBitmap(it, null, dst, iconP)
+        }
+
+        lblP.color = COLOR_COMBO_FG; canvas.drawText(text, cx + iconW/2, cy + lblP.textSize * 0.35f, lblP)
         lblP.typeface = Typeface.DEFAULT
     }
 
@@ -309,17 +328,12 @@ class GameView @JvmOverloads constructor(
         ringPath.reset(); ringPath.addRoundRect(ringRect, rad, rad, Path.Direction.CW)
         ringPathMeasure.setPath(ringPath, false)
         val total = ringPathMeasure.length
-
-        // Filling from bottom center (0.375 of total length) to both sides
-        val centerPos = total * 0.375f
+        val centerPos = total * 0.25f
         val halfLen = (ringFill * total / 2f).coerceIn(0f, total / 2f)
 
         ringDstPath.reset()
-        // Draw left side
         ringPathMeasure.getSegment((centerPos - halfLen + total) % total, centerPos, ringDstPath, true)
-        // Draw right side
         ringPathMeasure.getSegment(centerPos, (centerPos + halfLen) % total, ringDstPath, true)
-
         canvas.drawPath(ringDstPath, ringP)
     }
 
@@ -376,7 +390,7 @@ class GameView @JvmOverloads constructor(
     private fun drawDrag(canvas: Canvas) {
         val piece = currentPieces[draggingIdx] ?: return
         val cs = cellSize * 1.05f
-        val sx = dragX - piece.width*cs/2f; val sy = dragY - piece.height*cs/2f - cs*0.8f
+        val sx = dragX - piece.width*cs/2f; val sy = dragY - piece.height*cs/2f - cs*2.5f
         for (b in piece.blocks) {
             val l = sx+b.col*cs; val t = sy+b.row*cs
             rrRect.set(l+3f, t+3f, l+cs-3f, t+cs-3f)
@@ -394,6 +408,9 @@ class GameView @JvmOverloads constructor(
         val icons = listOf("🧲", "🧹", "✨")
         val labels = listOf("GRAVITY", "TRIPLE", "CLEAR")
         val charges = listOf(gravityCharges, tripleCharges, clearAllCharges)
+        val steps = listOf(GRAVITY_STEP, TRIPLE_STEP, CLEAR_ALL_STEP)
+        val lasts = listOf(lastGravityEarnedAt, lastTripleEarnedAt, lastClearAllEarnedAt)
+
         val isDarkMode = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
         val labelColor = if (isDarkMode) Color.WHITE else COLOR_ON_SURFACE_V
 
@@ -403,17 +420,31 @@ class GameView @JvmOverloads constructor(
             val on = count > 0
             bgP.color = if (on) Color.WHITE else 0x1A000000; bgP.style = Paint.Style.FILL
             canvas.drawRoundRect(r, 24f, 24f, bgP)
-            if (!on) {
-                bgP.color = 0x20000000; bgP.style = Paint.Style.STROKE; bgP.strokeWidth = 2f
-                canvas.drawRoundRect(r, 24f, 24f, bgP); bgP.style = Paint.Style.FILL
+            val progress = ((score - lasts[i]).toFloat() / steps[i]).coerceIn(0f, 1f)
+            if (progress > 0f && count < (if (i==2) 1 else 2)) {
+                bgP.color = COLOR_ABILITY_FILL
+                val fillH = r.height() * progress
+                tempRect.set(r.left, r.bottom - fillH, r.right, r.bottom)
+                canvas.save()
+                val path = Path(); path.addRoundRect(r, 24f, 24f, Path.Direction.CW)
+                canvas.clipPath(path)
+                canvas.drawRect(tempRect, bgP)
+                canvas.restore()
             }
             iconP.alpha = 255
             iconP.color = if (on) COLOR_PRIMARY else 0x40000000; iconP.textSize = r.height() * 0.45f
-            if (i == 2 && cleanBitmap != null) {
+            
+            val abilityBitmap = when (i) {
+                0 -> gravityBitmap
+                2 -> cleanBitmap
+                else -> null
+            }
+
+            if (abilityBitmap != null) {
                 val iSize = r.height() * 0.6f
                 tempRect.set(r.centerX() - iSize/2, r.centerY() - iSize/2, r.centerX() + iSize/2, r.centerY() + iSize/2)
                 if (!on) iconP.alpha = 64
-                canvas.drawBitmap(cleanBitmap!!, null, tempRect, iconP)
+                canvas.drawBitmap(abilityBitmap, null, tempRect, iconP)
             } else {
                 canvas.drawText(icons[i], r.centerX(), r.centerY() + iconP.textSize * 0.35f, iconP)
             }
@@ -434,9 +465,6 @@ class GameView @JvmOverloads constructor(
             val iSize = r.height() * 0.9f
             tempRect.set(r.centerX() - iSize/2, r.centerY() - iSize/2, r.centerX() + iSize/2, r.centerY() + iSize/2)
             iconP.alpha = 255; canvas.drawBitmap(it, null, tempRect, iconP)
-        } ?: run {
-            iconP.color = COLOR_PRIMARY; iconP.textSize = r.height() * 0.7f
-            canvas.drawText("↩", r.centerX(), r.centerY() + iconP.textSize * 0.35f, iconP)
         }
     }
 
@@ -465,7 +493,7 @@ class GameView @JvmOverloads constructor(
         }
         when (ev.action) {
             MotionEvent.ACTION_DOWN -> {
-                if (menuRect.contains(ev.x, ev.y)) return true
+                if (menuRect.contains(ev.x, ev.y)) { onMenuClicked?.invoke(); return true }
                 if (scoreRect.contains(ev.x, ev.y)) { isScoreVisible = !isScoreVisible; invalidate(); return true }
                 if (undoRect.contains(ev.x, ev.y)) { doUndo(); return true }
                 for (i in 0..2) if (abilityRects[i].contains(ev.x, ev.y)) { activateAbility(i); return true }
@@ -482,7 +510,7 @@ class GameView @JvmOverloads constructor(
         val idx = (x / sw).toInt().coerceIn(0, PIECE_SLOTS-1)
         if (currentPieces[idx] != null) {
             draggingIdx = idx; dragX = x; dragY = y
-            updateGhost(); invalidate(); vibrate(15)
+            updateGhost(); invalidate(); vibrate(40)
         }
     }
 
@@ -505,7 +533,7 @@ class GameView @JvmOverloads constructor(
 
     private fun updateGhost() {
         val piece = currentPieces[draggingIdx] ?: return
-        val ly = dragY - cellSize * 0.8f
+        val ly = dragY - cellSize * 2.5f
         ghostCol = ((dragX - boardLeft) / cellSize - piece.width / 2f + 0.5f).toInt()
         ghostRow = ((ly - boardTop) / cellSize - piece.height / 2f + 0.5f).toInt()
         canPlace = ly > boardTop && ly < boardTop + cellSize * BOARD_SIZE && canPlacePiece(piece, ghostRow, ghostCol)
@@ -528,24 +556,33 @@ class GameView @JvmOverloads constructor(
 
     private fun placePiece(piece: Piece, row: Int, col: Int) {
         for (b in piece.blocks) board[row+b.row][col+b.col] = piece.color
-        val comboMultiplier = if (comboLevel > 0) comboLevel else 1
-        score += piece.blocks.size * comboMultiplier
-        vibrate(30); clearAndCheck(); checkAbilities(); updateRing(); saveBest()
-    }
 
-    private fun clearAndCheck() {
         val rows = (0 until BOARD_SIZE).filter { r -> (0 until BOARD_SIZE).all { c -> board[r][c] != 0 } }
         val cols = (0 until BOARD_SIZE).filter { c -> (0 until BOARD_SIZE).all { r -> board[r][c] != 0 } }
-        if (rows.isEmpty() && cols.isEmpty()) {
-            movesSinceClear++
-            if (movesSinceClear >= 2 && (board.sumOf { r -> r.count { it != 0 } } >= 16)) breakCombo()
-            post { evalGameOver() }; return
+        val linesCleared = rows.size + cols.size
+
+        if (linesCleared > 0) {
+            movesSinceLastClear = 0
+            // +linesCleared: 2 ხაზი ერთდროულად → combo +2, 3 ხაზი → combo +3
+            comboLevel += linesCleared
+            score += (piece.blocks.size * comboLevel) + (linesCleared * BOARD_SIZE * comboLevel)
+            vibrate(80)
+            clearRows.addAll(rows); clearCols.addAll(cols); clearRunning = true
+            startClearAnim(rows, cols)
+        } else {
+            movesSinceLastClear++
+            if (movesSinceLastClear >= 4) {
+                comboLevel = 0
+            }
+            score += piece.blocks.size * (if (comboLevel > 0) comboLevel else 1)
+            vibrate(50)
+            post { evalGameOver() }
         }
-        movesSinceClear = 0; comboCount++; comboLevel = comboCount.coerceAtMost(100)
-        if (comboCount >= 2) vibratePattern(longArrayOf(0, 40, 40, 80)) else vibrate(60)
-        score += (rows.size + cols.size) * BOARD_SIZE * comboLevel
-        saveBest(); checkAbilities(); updateRing()
-        clearRows.addAll(rows); clearCols.addAll(cols); clearRunning = true
+
+        checkAbilities(); updateRing(); saveBest()
+    }
+
+    private fun startClearAnim(rows: List<Int>, cols: List<Int>) {
         ValueAnimator.ofFloat(0f, 1f, 0f).apply {
             duration = 400
             addUpdateListener { clearFlash = it.animatedValue as Float; invalidate() }
@@ -554,15 +591,13 @@ class GameView @JvmOverloads constructor(
                     rows.forEach { r -> for (c in 0 until BOARD_SIZE) board[r][c] = 0 }
                     cols.forEach { c -> for (r in 0 until BOARD_SIZE) board[r][c] = 0 }
                     clearRows.clear(); clearCols.clear()
-                    if (board.all { r -> r.all { it == 0 } }) { score += 500; vibratePattern(longArrayOf(0, 100, 50, 100)) }
                     clearFlash = 0f; clearRunning = false; invalidate(); post { evalGameOver() }
                 }
             })
         }.start()
     }
 
-    private fun evalGameOver() { if (!isGameOver && !clearRunning && isGameOverNow()) { isGameOver = true; vibrate(400); invalidate() } }
-    private fun breakCombo() { if (comboLevel == 0) return; comboCount = 0; comboLevel = 0; movesSinceClear = 0; invalidate() }
+    private fun evalGameOver() { if (!isGameOver && !clearRunning && isGameOverNow()) { isGameOver = true; vibrate(500); invalidate() } }
 
     private fun updateRing() {
         val lvl = score / RING_INTERVAL
@@ -572,35 +607,50 @@ class GameView @JvmOverloads constructor(
                 duration = 600
                 addUpdateListener { ringFlash = it.animatedValue as Float; invalidate() }
             }.start()
-            vibratePattern(longArrayOf(0, 40, 60, 100))
+            vibrate(150)
         }
         ringFill = (score % RING_INTERVAL).toFloat() / RING_INTERVAL; invalidate()
     }
 
     private fun checkAbilities() {
-        while (score >= lastGravityEarnedAt + 5000) { lastGravityEarnedAt += 5000; if (gravityCharges < 2) gravityCharges++ }
-        while (score >= lastTripleEarnedAt + 10000) { lastTripleEarnedAt += 10000; if (tripleCharges < 2) tripleCharges++ }
-        while (score >= lastClearAllEarnedAt + 20000) { lastClearAllEarnedAt += 20000; if (clearAllCharges < 1) clearAllCharges++ }
+        while (score >= lastGravityEarnedAt + GRAVITY_STEP) { lastGravityEarnedAt += GRAVITY_STEP; if (gravityCharges < 2) gravityCharges++ }
+        while (score >= lastTripleEarnedAt + TRIPLE_STEP) { lastTripleEarnedAt += TRIPLE_STEP; if (tripleCharges < 2) tripleCharges++ }
+        while (score >= lastClearAllEarnedAt + CLEAR_ALL_STEP) { lastClearAllEarnedAt += CLEAR_ALL_STEP; if (clearAllCharges < 1) clearAllCharges++ }
     }
 
     private fun activateAbility(i: Int) {
         when (i) {
-            0 -> if (gravityCharges > 0)  { applyGravity();   gravityCharges--;  vibrate(120) }
-            1 -> if (tripleCharges > 0)   { applyTriple();    tripleCharges--;   vibrate(120) }
-            2 -> if (clearAllCharges > 0) { clearAll();       clearAllCharges--; vibrate(200) }
+            0 -> if (gravityCharges > 0)  { applyGravityLoop(); gravityCharges--; vibrate(150) }
+            1 -> if (tripleCharges > 0)   { applyTriple();      tripleCharges--;  vibrate(150) }
+            2 -> if (clearAllCharges > 0) { clearAll();         clearAllCharges--; vibrate(250) }
         }
         updateRing(); saveBest(); post { evalGameOver() }; invalidate()
     }
 
-    private fun applyGravity() {
-        for (c in 0 until BOARD_SIZE) {
-            val col = (0 until BOARD_SIZE).mapNotNull { r -> board[r][c].takeIf { it != 0 } }
-            for (r in 0 until BOARD_SIZE) {
-                val i = col.size - (BOARD_SIZE - r)
-                board[r][c] = if (i >= 0) col[i] else 0
+    private fun applyGravityLoop() {
+        var changed = true
+        while (changed) {
+            changed = false
+            for (c in 0 until BOARD_SIZE) {
+                val col = (0 until BOARD_SIZE).mapNotNull { r -> board[r][c].takeIf { it != 0 } }
+                for (r in 0 until BOARD_SIZE) {
+                    val newVal = if (col.size - (BOARD_SIZE - r) >= 0) col[col.size - (BOARD_SIZE - r)] else 0
+                    if (board[r][c] != newVal) { board[r][c] = newVal; changed = true }
+                }
+            }
+            if (changed) {
+                val rows = (0 until BOARD_SIZE).filter { r -> (0 until BOARD_SIZE).all { c -> board[r][c] != 0 } }
+                val cols = (0 until BOARD_SIZE).filter { c -> (0 until BOARD_SIZE).all { r -> board[r][c] != 0 } }
+                if (rows.isNotEmpty() || cols.isNotEmpty()) {
+                    rows.forEach { r -> for (c in 0 until BOARD_SIZE) board[r][c] = 0 }
+                    cols.forEach { c -> for (r in 0 until BOARD_SIZE) board[r][c] = 0 }
+                    score += (rows.size + cols.size) * BOARD_SIZE
+                } else {
+                    break
+                }
             }
         }
-        clearAndCheck()
+        invalidate()
     }
 
     private fun applyTriple() {
@@ -624,22 +674,26 @@ class GameView @JvmOverloads constructor(
         val pb = prevBoard ?: return
         for (r in 0 until BOARD_SIZE) board[r] = pb[r].copyOf(); score = prevScore
         for (i in 0 until PIECE_SLOTS) { currentPieces[i] = prevPieces[i]; nextPieces[i] = prevNextPieces[i] }
-        prevBoard = null; breakCombo(); updateRing(); checkAbilities(); vibrate(40); invalidate()
+        prevBoard = null; comboLevel = 0; movesSinceLastClear = 0; updateRing(); checkAbilities(); vibrate(100); invalidate()
     }
 
     private fun refillPieces() {
         if (ringBonus) {
-            // Grant 3 pieces of 1x1 when ring is filled
-            for (i in 0 until PIECE_SLOTS) currentPieces[i] = PieceFactory.getOneByOne().copy(color = PASTEL.random())
-            ringBonus = false; vibrate(80); return
+            for (i in 0 until PIECE_SLOTS) currentPieces[i] = PieceFactory.getBonusPiece().copy(color = PASTEL.random())
+            ringBonus = false; vibrate(150); return
         }
-        for (i in 0 until PIECE_SLOTS) if (currentPieces[i] == null) { currentPieces[i] = nextPieces[i]; nextPieces[i] = PieceFactory.random().copy(color = PASTEL.random()) }
+        for (i in 0 until PIECE_SLOTS) if (currentPieces[i] == null) {
+            currentPieces[i] = nextPieces[i]
+            nextPieces[i] = PieceFactory.smartRandom(board).copy(color = PASTEL.random())
+        }
     }
+
+    fun startNewGame() = resetGame()
 
     private fun resetGame() {
         for (r in 0 until BOARD_SIZE) board[r].fill(0)
         for (i in 0 until PIECE_SLOTS) { currentPieces[i] = null; nextPieces[i] = PieceFactory.random().copy(color = PASTEL.random()) }
-        score = 0; isGameOver = false; clearRunning = false; comboCount = 0; comboLevel = 0; movesSinceClear = 0
+        score = 0; isGameOver = false; clearRunning = false; comboLevel = 0; movesSinceLastClear = 0
         ringFill = 0f; ringBonus = false; prevRingLevel = 0; ringFlash = 0f
         gravityCharges = 0; tripleCharges = 0; clearAllCharges = 0
         lastGravityEarnedAt = 0; lastTripleEarnedAt = 0; lastClearAllEarnedAt = 0
@@ -650,8 +704,16 @@ class GameView @JvmOverloads constructor(
 
     private fun saveBest() { if (score > bestScore) { bestScore = score; prefs().edit().putInt("best", bestScore).apply() } }
     private fun prefs() = context.getSharedPreferences("bb_prefs", Context.MODE_PRIVATE)
-    private fun vibrate(ms: Long) = runCatching { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator?.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE)) else vibrator?.vibrate(ms) }
-    private fun vibratePattern(p: LongArray) = runCatching { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator?.vibrate(VibrationEffect.createWaveform(p, -1)) else vibrator?.vibrate(p, -1) }
-    private fun scoreNoFmt(n: Int) = n.toString() // Removed comma formatting
+
+    private fun vibrate(ms: Long) {
+        if (!isVibrationEnabled) return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                vibrator?.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+            else vibrator?.vibrate(ms)
+        }
+    }
+
+    private fun scoreNoFmt(n: Int) = n.toString()
     private fun lerp(c1: Int, c2: Int, t: Float): Int { val i = 1f-t; return Color.argb(255, (Color.red(c1)*i + Color.red(c2)*t).toInt(), (Color.green(c1)*i + Color.green(c2)*t).toInt(), (Color.blue(c1)*i + Color.blue(c2)*t).toInt()) }
 }

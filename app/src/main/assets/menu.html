@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Menu</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #F8F9FA;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .menu-container {
+            text-align: center;
+            background: white;
+            padding: 40px;
+            border-radius: 24px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            width: 80%;
+            max-width: 320px;
+        }
+        h1 {
+            color: #215FA6;
+            margin-bottom: 30px;
+            margin-top: 0;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 15px 0;
+            margin: 12px 0;
+            font-size: 18px;
+            font-weight: bold;
+            color: white;
+            background-color: #215FA6;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            box-sizing: border-box;
+            transition: transform 0.1s;
+        }
+        .btn:active {
+            transform: scale(0.98);
+        }
+        .btn-secondary {
+            background-color: #336857;
+        }
+        .vibration-control {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .vibration-label {
+            font-size: 16px;
+            font-weight: bold;
+            color: #215FA6;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #215FA6;
+        }
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+    </style>
+</head>
+<body>
+<div class="menu-container">
+    <h1>Total Blocks</h1>
+    <button class="btn" onclick="Android.newGame()">NEW GAME</button>
+    <button class="btn btn-secondary" onclick="Android.closeMenu()">RESUME</button>
+
+    <div class="vibration-control">
+        <span class="vibration-label">VIBRATION (I/O)</span>
+        <label class="toggle-switch">
+            <input type="checkbox" id="vibrationToggle" checked onchange="toggleVibration(this.checked)">
+            <span class="slider"></span>
+        </label>
+    </div>
+</div>
+
+<script>
+    function toggleVibration(enabled) {
+        if (typeof Android !== 'undefined') {
+            Android.setVibrationEnabled(enabled);
+        }
+    }
+
+    // Called from Android (Activity) to sync toggle with real state.
+    // Activity should call: webView.evaluateJavascript("setToggleState(" + isVibrationEnabled + ")", null)
+    function setToggleState(enabled) {
+        document.getElementById('vibrationToggle').checked = enabled;
+    }
+
+    // Called from Activity every time the menu is shown:
+    //   webView.evaluateJavascript("onMenuOpen()", null)
+    function onMenuOpen() {
+        if (typeof Android !== 'undefined' && typeof Android.requestVibrationState === 'function') {
+            Android.requestVibrationState();
+        }
+    }
+
+    window.onload = function() {
+        onMenuOpen();
+    };
+</script>
+</body>
+</html>
