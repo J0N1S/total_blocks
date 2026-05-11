@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Total Blocks Menu</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #0D0D1A;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            overflow: hidden;
+            position: relative;
+            touch-action: none;
+            user-select: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Animated Background Elements */
+        .bg-circle {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(60px);
+            z-index: 0;
+            animation: move 20s infinite alternate ease-in-out;
+            opacity: 0.4;
+        }
+        .circle-1 { width: 300px; height: 300px; background: #215FA6; top: -100px; left: -100px; }
+        .circle-2 { width: 250px; height: 250px; background: #336857; bottom: -50px; right: -50px; animation-duration: 25s; }
+        .circle-3 { width: 200px; height: 200px; background: #69333A; top: 40%; right: 10%; animation-duration: 15s; }
+
+        @keyframes move {
+            from { transform: translate(0, 0) rotate(0deg); }
+            to { transform: translate(100px, 100px) rotate(360deg); }
+        }
+
+        .welcome-container {
+            position: relative;
+            z-index: 10;
+            text-align: center;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 40px 30px;
+            border-radius: 32px;
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            width: 85%;
+            max-width: 360px;
+            min-height: 500px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .page {
+            display: none;
+            width: 100%;
+            height: 100%;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .page.active {
+            display: flex;
+        }
+
+        h1 {
+            font-size: 36px;
+            margin-bottom: 30px;
+            margin-top: 0;
+            background: linear-gradient(to right, #215FA6, #4A90E2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-weight: 900;
+        }
+
+        h2 {
+            font-size: 24px;
+            margin-bottom: 30px;
+            color: white;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 14px 0;
+            margin: 12px 0;
+            font-size: 16px;
+            font-weight: bold;
+            color: white;
+            background: #215FA6;
+            border: none;
+            border-radius: 16px;
+            cursor: pointer;
+            box-sizing: border-box;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 15px rgba(33, 95, 166, 0.2);
+            text-transform: uppercase;
+        }
+
+        .btn:active {
+            transform: scale(0.96);
+        }
+
+        .btn-resume { background: #336857; box-shadow: 0 4px 15px rgba(51, 104, 87, 0.2); }
+        .btn-home { background: #424751; box-shadow: 0 4px 15px rgba(66, 71, 81, 0.2); }
+        .btn-back { background: transparent; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: none; margin-top: 20px; }
+
+        .btn-disabled {
+            background: rgba(255, 255, 255, 0.05);
+            color: rgba(255, 255, 255, 0.3);
+            cursor: default;
+            box-shadow: none;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .coming-soon {
+            display: block;
+            font-size: 10px;
+            opacity: 0.7;
+            margin-top: 2px;
+        }
+
+        /* Settings UI */
+        .control-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            padding: 0 10px;
+        }
+
+        .control-label {
+            font-size: 15px;
+            font-weight: bold;
+            color: #aaa;
+            text-transform: uppercase;
+        }
+
+        .toggle-switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #333; transition: .4s; border-radius: 28px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px;
+            background-color: white; transition: .4s; border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #215FA6; }
+        input:checked + .slider:before { transform: translateX(22px); }
+
+    </style>
+</head>
+<body>
+    <div class="bg-circle circle-1"></div>
+    <div class="bg-circle circle-2"></div>
+    <div class="bg-circle circle-3"></div>
+
+    <div class="welcome-container">
+
+        <!-- MAIN MENU PAGE -->
+        <div id="mainMenu" class="page active">
+            <h1>Total Blocks</h1>
+
+            <!-- Contextual layout controlled by setIsInGame -->
+            <div id="inGameView" style="display:none;">
+                <button class="btn btn-resume" onclick="Android.closeMenu()">RESUME</button>
+                <button class="btn btn-home" onclick="goHome()">HOME</button>
+                <button class="btn" onclick="showPage('settingsPage')">SETTINGS</button>
+            </div>
+
+            <div id="welcomeView">
+                <button class="btn" onclick="Android.newGame()">CLASSIC</button>
+                <button id="welcomeResume" class="btn btn-resume" style="display:none;" onclick="Android.closeMenu()">RESUME</button>
+                <button class="btn btn-disabled">
+                    TIME ATTACK <span class="coming-soon">(Coming Soon)</span>
+                </button>
+                <button class="btn btn-disabled">
+                    FRIEND FIGHT <span class="coming-soon">(Coming Soon)</span>
+                </button>
+                <button class="btn" onclick="showPage('settingsPage')">SETTINGS</button>
+            </div>
+        </div>
+
+        <!-- SETTINGS PAGE -->
+        <div id="settingsPage" class="page">
+            <h2>Settings</h2>
+
+            <div class="control-row">
+                <span class="control-label">Vibration</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="vibrationToggle" checked onchange="Android.setVibrationEnabled(this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="control-row">
+                <span class="control-label">Sound</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="soundToggle" checked onchange="Android.setSoundEnabled(this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <button class="btn btn-back" onclick="showPage('mainMenu')">BACK</button>
+        </div>
+
+    </div>
+
+    <script>
+        let isCurrentlyInGame = false;
+
+        function showPage(pageId) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById(pageId).classList.add('active');
+        }
+
+        function goHome() {
+            isCurrentlyInGame = false;
+            updateUI();
+        }
+
+        function setIsInGame(inGame) {
+            isCurrentlyInGame = inGame;
+            updateUI();
+        }
+
+        function setHasSavedGame(hasSaved) {
+            const welcomeResume = document.getElementById('welcomeResume');
+            welcomeResume.style.display = hasSaved ? 'block' : 'none';
+        }
+
+        function updateUI() {
+            const inGameView = document.getElementById('inGameView');
+            const welcomeView = document.getElementById('welcomeView');
+
+            if (isCurrentlyInGame) {
+                inGameView.style.display = 'block';
+                welcomeView.style.display = 'none';
+            } else {
+                inGameView.style.display = 'none';
+                welcomeView.style.display = 'block';
+                // Request saved state only when returning home
+                if (typeof Android !== 'undefined' && typeof Android.requestSavedGameState === 'function') {
+                    Android.requestSavedGameState();
+                }
+            }
+        }
+
+        function setToggleState(type, enabled) {
+            if (type === 'vibration') {
+                document.getElementById('vibrationToggle').checked = enabled;
+            } else if (type === 'sound') {
+                document.getElementById('soundToggle').checked = enabled;
+            }
+        }
+
+        function onMenuOpen() {
+            if (typeof Android !== 'undefined') {
+                if (typeof Android.requestVibrationState === 'function') Android.requestVibrationState();
+                if (typeof Android.requestSoundState === 'function') Android.requestSoundState();
+                if (!isCurrentlyInGame && typeof Android.requestSavedGameState === 'function') {
+                    Android.requestSavedGameState();
+                }
+            }
+        }
+
+        window.onload = onMenuOpen;
+
+        document.addEventListener('touchmove', function(e) {
+            e.preventDefault();
+        }, { passive: false });
+    </script>
+</body>
+</html>

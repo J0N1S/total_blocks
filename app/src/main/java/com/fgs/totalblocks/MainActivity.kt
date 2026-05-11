@@ -22,6 +22,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var gameView: GameView
     private var menuDialog: Dialog? = null
     private var menuWebView: WebView? = null
+    private var gameStarted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,13 +32,25 @@ class MainActivity : AppCompatActivity() {
         gameView = findViewById(R.id.gameView)
 
         gameView.onMenuClicked = {
-            showMenu()
+            showMenu(true)
         }
 
         // Initialize WebView once
         setupMenuWebView()
 
         checkNotificationPermission()
+
+        // Show welcome display on startup (Home)
+        gameView.post { showMenu(false) }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        cancelNotification()
+    }
+
+    override fun onStop() {
+        super.onStop()
         scheduleNotification()
     }
 
@@ -57,15 +70,25 @@ class MainActivity : AppCompatActivity() {
         )
 
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val interval = 60 * 1000L // 1 minute
-        val triggerAtMillis = System.currentTimeMillis() + interval
+        val threeHours = 3 * 60 * 60 * 1000L
+        val triggerAtMillis = System.currentTimeMillis() + threeHours
 
-        alarmManager.setRepeating(
+        alarmManager.setInexactRepeating(
             AlarmManager.RTC_WAKEUP,
             triggerAtMillis,
-            interval,
+            threeHours,
             pendingIntent
         )
+    }
+
+    private fun cancelNotification() {
+        val intent = Intent(this, NotificationReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmManager.cancel(pendingIntent)
     }
 
     private fun setupMenuWebView() {
@@ -73,6 +96,12 @@ class MainActivity : AppCompatActivity() {
             settings.javaScriptEnabled = true
             settings.allowFileAccess = true
             settings.domStorageEnabled = true
+            
+            // Disable scrolling
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = android.view.View.OVER_SCROLL_NEVER
+
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     syncVibrationState()
@@ -89,6 +118,7 @@ class MainActivity : AppCompatActivity() {
 
                 @android.webkit.JavascriptInterface
                 fun newGame() = runOnUiThread {
+                    gameStarted = true
                     menuDialog?.dismiss()
                     gameView.startNewGame()
                 }
@@ -112,9 +142,15 @@ class MainActivity : AppCompatActivity() {
                 fun requestSoundState() = runOnUiThread {
                     syncSoundState()
                 }
+
+                @android.webkit.JavascriptInterface
+                fun requestSavedGameState() = runOnUiThread {
+                    val hasSaved = gameView.hasSavedGame()
+                    menuWebView?.evaluateJavascript("setHasSavedGame($hasSaved)", null)
+                }
             }, "Android")
 
-            loadUrl("file:///android_asset/menu.html")
+            loadUrl("file:///android_asset/welcome.html")
         }
     }
 
@@ -128,11 +164,10 @@ class MainActivity : AppCompatActivity() {
         menuWebView?.evaluateJavascript("setToggleState('sound', $state)", null)
     }
 
-    private fun showMenu() {
+    private fun showMenu(isInGame: Boolean) {
         if (menuDialog == null) {
             menuDialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
             menuWebView?.let {
-                // Remove from previous parent if necessary
                 (it.parent as? android.view.ViewGroup)?.removeView(it)
                 menuDialog?.setContentView(it)
             }
@@ -140,8 +175,11 @@ class MainActivity : AppCompatActivity() {
         
         syncVibrationState()
         syncSoundState()
+        
+        // Pass the state to JS
+        menuWebView?.evaluateJavascript("setIsInGame($isInGame)", null)
+        
         menuDialog?.show()
-        // Also trigger the menu open event in JS
         menuWebView?.evaluateJavascript("onMenuOpen()", null)
     }
 
