@@ -1,12 +1,21 @@
 package com.fgs.totalblocks
 
+import android.Manifest
+import android.app.AlarmManager
 import android.app.Dialog
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
@@ -27,6 +36,36 @@ class MainActivity : AppCompatActivity() {
 
         // Initialize WebView once
         setupMenuWebView()
+
+        checkNotificationPermission()
+        scheduleNotification()
+    }
+
+    private fun checkNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+            }
+        }
+    }
+
+    private fun scheduleNotification() {
+        val intent = Intent(this, NotificationReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val interval = 60 * 1000L // 1 minute
+        val triggerAtMillis = System.currentTimeMillis() + interval
+
+        alarmManager.setRepeating(
+            AlarmManager.RTC_WAKEUP,
+            triggerAtMillis,
+            interval,
+            pendingIntent
+        )
     }
 
     private fun setupMenuWebView() {
@@ -37,6 +76,7 @@ class MainActivity : AppCompatActivity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     syncVibrationState()
+                    syncSoundState()
                 }
             }
             webChromeClient = WebChromeClient()
@@ -59,8 +99,18 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 @android.webkit.JavascriptInterface
+                fun setSoundEnabled(enabled: Boolean) = runOnUiThread {
+                    gameView.isSoundEnabled = enabled
+                }
+
+                @android.webkit.JavascriptInterface
                 fun requestVibrationState() = runOnUiThread {
                     syncVibrationState()
+                }
+
+                @android.webkit.JavascriptInterface
+                fun requestSoundState() = runOnUiThread {
+                    syncSoundState()
                 }
             }, "Android")
 
@@ -70,7 +120,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun syncVibrationState() {
         val state = gameView.isVibrationEnabled
-        menuWebView?.evaluateJavascript("setToggleState($state)", null)
+        menuWebView?.evaluateJavascript("setToggleState('vibration', $state)", null)
+    }
+
+    private fun syncSoundState() {
+        val state = gameView.isSoundEnabled
+        menuWebView?.evaluateJavascript("setToggleState('sound', $state)", null)
     }
 
     private fun showMenu() {
@@ -84,6 +139,7 @@ class MainActivity : AppCompatActivity() {
         }
         
         syncVibrationState()
+        syncSoundState()
         menuDialog?.show()
         // Also trigger the menu open event in JS
         menuWebView?.evaluateJavascript("onMenuOpen()", null)

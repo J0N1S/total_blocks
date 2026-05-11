@@ -50,15 +50,19 @@
         .btn-secondary {
             background-color: #336857;
         }
-        .vibration-control {
-            margin-top: 25px;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
+        .control-row {
+            margin-top: 15px;
+            padding-top: 10px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .vibration-label {
+        .control-row:first-of-type {
+            margin-top: 25px;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+        }
+        .control-label {
             font-size: 16px;
             font-weight: bold;
             color: #215FA6;
@@ -110,10 +114,18 @@
     <button class="btn" onclick="Android.newGame()">NEW GAME</button>
     <button class="btn btn-secondary" onclick="Android.closeMenu()">RESUME</button>
 
-    <div class="vibration-control">
-        <span class="vibration-label">VIBRATION (I/O)</span>
+    <div class="control-row">
+        <span class="control-label">VIBRATION (I/O)</span>
         <label class="toggle-switch">
             <input type="checkbox" id="vibrationToggle" checked onchange="toggleVibration(this.checked)">
+            <span class="slider"></span>
+        </label>
+    </div>
+
+    <div class="control-row">
+        <span class="control-label">SOUND (I/O)</span>
+        <label class="toggle-switch">
+            <input type="checkbox" id="soundToggle" checked onchange="toggleSound(this.checked)">
             <span class="slider"></span>
         </label>
     </div>
@@ -126,17 +138,26 @@
         }
     }
 
+    function toggleSound(enabled) {
+        if (typeof Android !== 'undefined') {
+            Android.setSoundEnabled(enabled);
+        }
+    }
+
     // Called from Android (Activity) to sync toggle with real state.
-    // Activity should call: webView.evaluateJavascript("setToggleState(" + isVibrationEnabled + ")", null)
-    function setToggleState(enabled) {
-        document.getElementById('vibrationToggle').checked = enabled;
+    function setToggleState(type, enabled) {
+        if (type === 'vibration') {
+            document.getElementById('vibrationToggle').checked = enabled;
+        } else if (type === 'sound') {
+            document.getElementById('soundToggle').checked = enabled;
+        }
     }
 
     // Called from Activity every time the menu is shown:
-    //   webView.evaluateJavascript("onMenuOpen()", null)
     function onMenuOpen() {
-        if (typeof Android !== 'undefined' && typeof Android.requestVibrationState === 'function') {
-            Android.requestVibrationState();
+        if (typeof Android !== 'undefined') {
+            if (typeof Android.requestVibrationState === 'function') Android.requestVibrationState();
+            if (typeof Android.requestSoundState === 'function') Android.requestSoundState();
         }
     }
 

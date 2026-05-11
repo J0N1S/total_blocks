@@ -3,6 +3,8 @@ package com.fgs.totalblocks
 import android.animation.*
 import android.content.Context
 import android.graphics.*
+import android.media.AudioAttributes
+import android.media.SoundPool
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -29,13 +31,21 @@ class GameView @JvmOverloads constructor(
 
     var onMenuClicked: (() -> Unit)? = null
 
-    // Use @Volatile and ensure thread-safe access from WebView
     @Volatile
     var isVibrationEnabled: Boolean = true
         set(value) {
             if (field != value) {
                 field = value
                 prefs().edit().putBoolean("vibration_enabled", value).apply()
+            }
+        }
+
+    @Volatile
+    var isSoundEnabled: Boolean = true
+        set(value) {
+            if (field != value) {
+                field = value
+                prefs().edit().putBoolean("sound_enabled", value).apply()
             }
         }
 
@@ -66,7 +76,6 @@ class GameView @JvmOverloads constructor(
         )
 
         fun random(): Piece = Piece(templates.random(), 0)
-        fun getBonusPiece(): Piece = Piece(templates[0], 0)
 
         fun smartRandom(board: Array<IntArray>): Piece {
             val shuffled = templates.shuffled()
@@ -101,7 +110,6 @@ class GameView @JvmOverloads constructor(
     private var ringFill       = 0f
     private var prevRingLevel  = 0
     private var ringFlash      = 0f
-    private var ringBonus      = false
 
     private var gravityCharges = 0
     private var tripleCharges  = 0
@@ -111,6 +119,8 @@ class GameView @JvmOverloads constructor(
     private var lastClearAllEarnedAt = 0
     private val abilityRects   = Array(3) { RectF() }
 
+    private val ghostRows = mutableSetOf<Int>()
+    private val ghostCols = mutableSetOf<Int>()
     private var draggingIdx = -1
     private var dragX = 0f; private var dragY = 0f
     private var ghostRow = -1; private var ghostCol = -1
@@ -131,6 +141,7 @@ class GameView @JvmOverloads constructor(
     private val clearRows = mutableSetOf<Int>()
     private val clearCols = mutableSetOf<Int>()
     private var clearFlash    = 0f
+    private var clearScale    = 1f
     private var clearRunning  = false
 
     private var isGameOver = false
@@ -142,6 +153,10 @@ class GameView @JvmOverloads constructor(
     private var cleanBitmap: Bitmap? = null
     private var gravityBitmap: Bitmap? = null
     private var thunderBitmap: Bitmap? = null
+
+    private var soundPool: SoundPool? = null
+    private var desapearSoundId: Int = 0
+    private var comboSounds = IntArray(5)
 
     private val vibrator: Vibrator? = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
@@ -188,9 +203,28 @@ class GameView @JvmOverloads constructor(
         for (i in 0 until PIECE_SLOTS) nextPieces[i] = PieceFactory.random().copy(color = PASTEL.random())
         refillPieces()
         bestScore = prefs().getInt("best", 0)
-        // Load vibration state directly from prefs in init
+        // Load states directly from prefs in init
         isVibrationEnabled = prefs().getBoolean("vibration_enabled", true)
+        isSoundEnabled = prefs().getBoolean("sound_enabled", true)
         loadBitmaps()
+        initSounds()
+    }
+
+    private fun initSounds() {
+        val attr = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_GAME)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        soundPool = SoundPool.Builder()
+            .setMaxStreams(5)
+            .setAudioAttributes(attr)
+            .build()
+        desapearSoundId = soundPool?.load(context, R.raw.desapear, 1) ?: 0
+        comboSounds[0] = soundPool?.load(context, R.raw.combo2, 1) ?: 0
+        comboSounds[1] = soundPool?.load(context, R.raw.combo3, 1) ?: 0
+        comboSounds[2] = soundPool?.load(context, R.raw.combo4, 1) ?: 0
+        comboSounds[3] = soundPool?.load(context, R.raw.combo5, 1) ?: 0
+        comboSounds[4] = soundPool?.load(context, R.raw.combo6, 1) ?: 0
     }
 
     private fun loadBitmaps() {
@@ -342,18 +376,39 @@ class GameView @JvmOverloads constructor(
         bgP.color = COLOR_SURFACE_CON; canvas.drawRoundRect(boardLeft-8f, boardTop-8f, br+8f, bb+8f, 32f, 32f, bgP)
         for (r in 0 until BOARD_SIZE) for (c in 0 until BOARD_SIZE) {
             val l = boardLeft + c*cellSize; val t = boardTop + r*cellSize
-            rrRect.set(l+4f, t+4f, l+cellSize-4f, t+cellSize-4f)
             val occ = board[r][c] != 0
-            val flash = (r in clearRows || c in clearCols) && occ
-            when {
-                flash -> { blockP.color = lerp(board[r][c], Color.WHITE, clearFlash); canvas.drawRoundRect(rrRect, 12f, 12f, blockP) }
-                occ -> drawCell(canvas, l, t, board[r][c], cellSize)
-                else -> { cellP.color = 0x1A000000; canvas.drawRoundRect(rrRect, 12f, 12f, cellP) }
+            val isClearing = (r in clearRows || c in clearCols) && occ
+            val ghostFlash = (r in ghostRows || c in ghostCols)
+
+            if (isClearing) {
+                val size = cellSize * clearScale
+                val offset = (cellSize - size) / 2f
+                rrRect.set(l + offset + 4f, t + offset + 4f, l + offset + size - 4f, t + offset + size - 4f)
+                blockP.color = lerp(board[r][c], Color.WHITE, clearFlash)
+                canvas.drawRoundRect(rrRect, 12f * clearScale, 12f * clearScale, blockP)
+            } else {
+                rrRect.set(l+4f, t+4f, l+cellSize-4f, t+cellSize-4f)
+                if (occ) {
+                    if (ghostFlash) {
+                        blockP.color = lerp(board[r][c], Color.WHITE, 0.4f)
+                        canvas.drawRoundRect(rrRect, 12f, 12f, blockP)
+                    } else {
+                        drawCell(canvas, l, t, board[r][c], cellSize)
+                    }
+                } else {
+                    cellP.color = 0x1A000000; canvas.drawRoundRect(rrRect, 12f, 12f, cellP)
+                }
             }
+
             if (draggingIdx >= 0 && ghostRow >= 0 && canPlace && !occ) {
                 currentPieces[draggingIdx]?.let { p ->
                     if (p.blocks.any { b -> ghostRow+b.row==r && ghostCol+b.col==c }) {
-                        ghostP.color = p.color; ghostP.alpha = 100
+                        if (ghostFlash) {
+                            ghostP.color = lerp(p.color, Color.WHITE, 0.6f)
+                            ghostP.alpha = 200
+                        } else {
+                            ghostP.color = p.color; ghostP.alpha = 100
+                        }
                         canvas.drawRoundRect(rrRect, 12f, 12f, ghostP); ghostP.alpha = 255
                     }
                 }
@@ -536,7 +591,30 @@ class GameView @JvmOverloads constructor(
         val ly = dragY - cellSize * 2.5f
         ghostCol = ((dragX - boardLeft) / cellSize - piece.width / 2f + 0.5f).toInt()
         ghostRow = ((ly - boardTop) / cellSize - piece.height / 2f + 0.5f).toInt()
+        
+        ghostRows.clear()
+        ghostCols.clear()
+        
         canPlace = ly > boardTop && ly < boardTop + cellSize * BOARD_SIZE && canPlacePiece(piece, ghostRow, ghostCol)
+        
+        if (canPlace) {
+            for (r in 0 until BOARD_SIZE) {
+                var full = true
+                for (c in 0 until BOARD_SIZE) {
+                    val occupied = board[r][c] != 0 || piece.blocks.any { it.row + ghostRow == r && it.col + ghostCol == c }
+                    if (!occupied) { full = false; break }
+                }
+                if (full) ghostRows.add(r)
+            }
+            for (c in 0 until BOARD_SIZE) {
+                var full = true
+                for (r in 0 until BOARD_SIZE) {
+                    val occupied = board[r][c] != 0 || piece.blocks.any { it.row + ghostRow == r && it.col + ghostCol == c }
+                    if (!occupied) { full = false; break }
+                }
+                if (full) ghostCols.add(c)
+            }
+        }
     }
 
     private fun canPlacePiece(p: Piece, row: Int, col: Int): Boolean {
@@ -583,15 +661,34 @@ class GameView @JvmOverloads constructor(
     }
 
     private fun startClearAnim(rows: List<Int>, cols: List<Int>) {
-        ValueAnimator.ofFloat(0f, 1f, 0f).apply {
-            duration = 400
-            addUpdateListener { clearFlash = it.animatedValue as Float; invalidate() }
+        if (isSoundEnabled) {
+            val soundToPlay = when {
+                comboLevel in 2..3 -> comboSounds[0]
+                comboLevel in 4..6 -> comboSounds[1]
+                comboLevel in 7..8 -> comboSounds[2]
+                comboLevel in 9..10 -> comboSounds[3]
+                comboLevel >= 11 -> comboSounds[4]
+                else -> desapearSoundId
+            }
+            soundPool?.play(soundToPlay, 1f, 1f, 1, 0, 1f)
+        }
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 450
+            addUpdateListener { 
+                val v = it.animatedValue as Float
+                clearFlash = v 
+                clearScale = when {
+                    v < 0.3f -> 1f + (v / 0.3f) * 0.15f // Pop
+                    else -> ((1f - (v - 0.3f) / 0.7f) * 1.15f).coerceAtLeast(0f) // Shrink
+                }
+                invalidate() 
+            }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     rows.forEach { r -> for (c in 0 until BOARD_SIZE) board[r][c] = 0 }
                     cols.forEach { c -> for (r in 0 until BOARD_SIZE) board[r][c] = 0 }
                     clearRows.clear(); clearCols.clear()
-                    clearFlash = 0f; clearRunning = false; invalidate(); post { evalGameOver() }
+                    clearFlash = 0f; clearScale = 1f; clearRunning = false; invalidate(); post { evalGameOver() }
                 }
             })
         }.start()
@@ -602,7 +699,7 @@ class GameView @JvmOverloads constructor(
     private fun updateRing() {
         val lvl = score / RING_INTERVAL
         if (lvl > prevRingLevel) {
-            prevRingLevel = lvl; ringBonus = true
+            prevRingLevel = lvl
             ValueAnimator.ofFloat(0f, 1f, 0f).apply {
                 duration = 600
                 addUpdateListener { ringFlash = it.animatedValue as Float; invalidate() }
@@ -678,10 +775,6 @@ class GameView @JvmOverloads constructor(
     }
 
     private fun refillPieces() {
-        if (ringBonus) {
-            for (i in 0 until PIECE_SLOTS) currentPieces[i] = PieceFactory.getBonusPiece().copy(color = PASTEL.random())
-            ringBonus = false; vibrate(150); return
-        }
         for (i in 0 until PIECE_SLOTS) if (currentPieces[i] == null) {
             currentPieces[i] = nextPieces[i]
             nextPieces[i] = PieceFactory.smartRandom(board).copy(color = PASTEL.random())
@@ -694,7 +787,7 @@ class GameView @JvmOverloads constructor(
         for (r in 0 until BOARD_SIZE) board[r].fill(0)
         for (i in 0 until PIECE_SLOTS) { currentPieces[i] = null; nextPieces[i] = PieceFactory.random().copy(color = PASTEL.random()) }
         score = 0; isGameOver = false; clearRunning = false; comboLevel = 0; movesSinceLastClear = 0
-        ringFill = 0f; ringBonus = false; prevRingLevel = 0; ringFlash = 0f
+        ringFill = 0f; prevRingLevel = 0; ringFlash = 0f
         gravityCharges = 0; tripleCharges = 0; clearAllCharges = 0
         lastGravityEarnedAt = 0; lastTripleEarnedAt = 0; lastClearAllEarnedAt = 0
         prevBoard = null; prevScore = 0
@@ -716,4 +809,10 @@ class GameView @JvmOverloads constructor(
 
     private fun scoreNoFmt(n: Int) = n.toString()
     private fun lerp(c1: Int, c2: Int, t: Float): Int { val i = 1f-t; return Color.argb(255, (Color.red(c1)*i + Color.red(c2)*t).toInt(), (Color.green(c1)*i + Color.green(c2)*t).toInt(), (Color.blue(c1)*i + Color.blue(c2)*t).toInt()) }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        soundPool?.release()
+        soundPool = null
+    }
 }
