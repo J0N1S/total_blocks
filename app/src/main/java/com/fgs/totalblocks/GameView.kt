@@ -30,6 +30,7 @@ class GameView @JvmOverloads constructor(
     }
 
     var onMenuClicked: (() -> Unit)? = null
+    var onHomeClicked: (() -> Unit)? = null
 
     @Volatile
     var isVibrationEnabled: Boolean = true
@@ -298,6 +299,7 @@ class GameView @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
+        updateTimer()
         drawBg(canvas)
         drawHUD(canvas)
         drawRing(canvas)
@@ -307,6 +309,25 @@ class GameView @JvmOverloads constructor(
         drawUndo(canvas)
         if (draggingIdx >= 0) drawDrag(canvas)
         if (isGameOver)       drawGameOver(canvas)
+    }
+
+    private fun updateTimer() {
+        if (!isTimeAttack || isGameOver || clearRunning) {
+            lastFrameTime = System.currentTimeMillis()
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (lastFrameTime > 0) {
+            val delta = now - lastFrameTime
+            timeLeftMillis -= delta
+            if (timeLeftMillis <= 0) {
+                timeLeftMillis = 0
+                isGameOver = true
+                invalidate()
+            }
+        }
+        lastFrameTime = now
+        postInvalidateOnAnimation()
     }
 
     private var bgStartTime = System.currentTimeMillis()
@@ -468,13 +489,26 @@ class GameView @JvmOverloads constructor(
 
         val scoreY = boardTop * 0.75f
         txtP.textSize = height * 0.055f; txtP.color = textColor; txtP.textAlign = Paint.Align.CENTER
-        if (isScoreVisible) {
-            canvas.drawText(scoreNoFmt(score), width / 2f, scoreY, txtP)
+        
+        if (isTimeAttack) {
+            val seconds = (timeLeftMillis / 1000).coerceAtLeast(0)
+            val timeStr = String.format(java.util.Locale.US, "%02d:%02d", seconds / 60, seconds % 60)
+            txtP.color = if (timeLeftMillis < 10000) Color.RED else textColor
+            canvas.drawText(timeStr, width / 2f, scoreY, txtP)
+            
+            // Draw small score below timer
+            txtP.textSize = height * 0.02f
+            txtP.color = textColor
+            canvas.drawText("SCORE: ${scoreNoFmt(score)}", width / 2f, scoreY + height * 0.04f, txtP)
         } else {
-            hideBitmap?.let {
-                val hSize = txtP.textSize * 0.6f
-                tempRect.set(width/2f - hSize/2, scoreY - hSize*0.75f, width/2f + hSize/2, scoreY + hSize*0.25f)
-                canvas.drawBitmap(it, null, tempRect, iconP)
+            if (isScoreVisible) {
+                canvas.drawText(scoreNoFmt(score), width / 2f, scoreY, txtP)
+            } else {
+                hideBitmap?.let {
+                    val hSize = txtP.textSize * 0.6f
+                    tempRect.set(width/2f - hSize/2, scoreY - hSize*0.75f, width/2f + hSize/2, scoreY + hSize*0.25f)
+                    canvas.drawBitmap(it, null, tempRect, iconP)
+                }
             }
         }
         scoreRect.set(width/2f - 200f, scoreY - 150f, width/2f + 200f, scoreY + 80f)
@@ -767,7 +801,7 @@ class GameView @JvmOverloads constructor(
                 if (gameOverNewGameRect.contains(ev.x, ev.y)) {
                     startNewGame()
                 } else if (gameOverHomeRect.contains(ev.x, ev.y)) {
-                    onMenuClicked?.invoke()
+                    onHomeClicked?.invoke()
                 }
             }
             return true
@@ -869,6 +903,11 @@ class GameView @JvmOverloads constructor(
             movesSinceLastClear = 0
             comboLevel += linesCleared
             score += (piece.blocks.size * comboLevel) + (linesCleared * BOARD_SIZE * comboLevel)
+            
+            if (isTimeAttack) {
+                timeLeftMillis += if (linesCleared > 1) 15000L else 5000L
+            }
+
             vibrate(80)
             clearRows.addAll(rows); clearCols.addAll(cols); clearRunning = true
             startClearAnim(rows, cols)
@@ -1009,9 +1048,24 @@ class GameView @JvmOverloads constructor(
         if (changed) saveGameState()
     }
 
+    private var isTimeAttack = false
+    private var timeLeftMillis = 60000L
+    private var lastFrameTime = 0L
+
     fun startNewGame() {
         resetGame()
         saveGameState()
+    }
+
+    fun startClassic() {
+        isTimeAttack = false
+        startNewGame()
+    }
+
+    fun startTimeAttack() {
+        isTimeAttack = true
+        timeLeftMillis = 60000L
+        startNewGame()
     }
 
     private fun resetGame() {
@@ -1025,6 +1079,8 @@ class GameView @JvmOverloads constructor(
         gravityCharges = 0; tripleCharges = 0; clearAllCharges = 0
         lastGravityEarnedAt = 0; lastTripleEarnedAt = 0; lastClearAllEarnedAt = 0
         prevBoard = null; prevScore = 0
+        timeLeftMillis = 60000L
+        lastFrameTime = 0L
         for (i in 0 until PIECE_SLOTS) { prevPieces[i] = null; prevNextPieces[i] = null }
         refillPieces(); invalidate()
     }
@@ -1043,6 +1099,8 @@ class GameView @JvmOverloads constructor(
         p.putInt("lastClearAllEarnedAt", lastClearAllEarnedAt)
         p.putInt("prevRingLevel", prevRingLevel)
         p.putBoolean("isGameOver", isGameOver)
+        p.putBoolean("isTimeAttack", isTimeAttack)
+        p.putLong("timeLeftMillis", timeLeftMillis)
 
         // Board
         val sb = StringBuilder()
@@ -1070,6 +1128,8 @@ class GameView @JvmOverloads constructor(
         lastClearAllEarnedAt = pr.getInt("lastClearAllEarnedAt", 0)
         prevRingLevel = pr.getInt("prevRingLevel", 0)
         isGameOver = pr.getBoolean("isGameOver", false)
+        isTimeAttack = pr.getBoolean("isTimeAttack", false)
+        timeLeftMillis = pr.getLong("timeLeftMillis", 60000L)
 
         val bStr = pr.getString("board", "") ?: ""
         if (bStr.isNotEmpty()) {

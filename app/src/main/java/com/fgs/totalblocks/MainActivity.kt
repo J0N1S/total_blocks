@@ -35,6 +35,10 @@ class MainActivity : AppCompatActivity() {
             showMenu(true)
         }
 
+        gameView.onHomeClicked = {
+            showMenu(false)
+        }
+
         // Initialize WebView once
         setupMenuWebView()
 
@@ -120,7 +124,14 @@ class MainActivity : AppCompatActivity() {
                 fun newGame() = runOnUiThread {
                     gameStarted = true
                     menuDialog?.dismiss()
-                    gameView.startNewGame()
+                    gameView.startClassic()
+                }
+
+                @android.webkit.JavascriptInterface
+                fun startTimeAttack() = runOnUiThread {
+                    gameStarted = true
+                    menuDialog?.dismiss()
+                    gameView.startTimeAttack()
                 }
 
                 @android.webkit.JavascriptInterface
