@@ -56,34 +56,50 @@ class GameView @JvmOverloads constructor(
     }
 
     object PieceFactory {
-        private val templates = listOf(
-            listOf(Block(0,0), Block(0,1)), // 2x1
-            listOf(Block(0,0), Block(1,0)), // 1x2
-            listOf(Block(0,0), Block(0,1), Block(0,2)), // 3x1
-            listOf(Block(0,0), Block(1,0), Block(2,0)), // 1x3
-            listOf(Block(0,0), Block(0,1), Block(1,0), Block(1,1)), // 2x2
-            listOf(Block(0,0), Block(1,0), Block(1,1)), // L-small
-            listOf(Block(0,0), Block(1,0), Block(2,0), Block(2,1)), // L-3x2
+        private val baseTemplates = listOf(
+            listOf(Block(0,0), Block(0,1)), // 2x1 Line
+            listOf(Block(0,0), Block(0,1), Block(0,2)), // 3x1 Line
+            listOf(Block(0,0), Block(0,1), Block(0,2), Block(0,3)), // 4x1 Line
+            listOf(Block(0,0), Block(0,1), Block(0,2), Block(0,3), Block(0,4)), // 5x1 Line
+            listOf(Block(0,0), Block(0,1), Block(1,0), Block(1,1)), // 2x2 Square
+            listOf(Block(0,0), Block(0,1), Block(0,2), Block(1,0), Block(1,1), Block(1,2), Block(2,0), Block(2,1), Block(2,2)), // 3x3 Square
+            listOf(Block(0,0), Block(1,0), Block(1,1)), // L-small (3 blocks)
+            listOf(Block(0,0), Block(1,0), Block(2,0), Block(2,1)), // L-shape (4 blocks)
             listOf(Block(0,0), Block(0,1), Block(0,2), Block(1,1)), // T-shape
             listOf(Block(0,0), Block(1,0), Block(1,1), Block(2,1)), // Z-shape
-            listOf(Block(0,0), Block(0,1), Block(0,2), Block(1,0), Block(1,1), Block(1,2), Block(2,0), Block(2,1), Block(2,2)), // 3x3 Square
             listOf(Block(0,0), Block(0,1), Block(0,2), Block(1,0), Block(1,1), Block(1,2)), // 2x3 Rectangle
-            listOf(Block(0,0), Block(1,0), Block(2,0), Block(2,1), Block(2,2)), // 3x3 L-shape
-            listOf(Block(0,0), Block(0,1), Block(0,2), Block(0,3)), // 1x4
-            listOf(Block(0,0), Block(1,0), Block(2,0), Block(3,0)), // 4x1
-            listOf(Block(0,0), Block(0,1), Block(0,2), Block(0,3), Block(0,4)), // 1x5
-            listOf(Block(0,0), Block(1,0), Block(2,0), Block(3,0), Block(4,0))  // 5x1
+            listOf(Block(0,0), Block(1,0), Block(2,0), Block(2,1), Block(2,2)) // 3x3 L-shape
         )
 
-        fun random(): Piece = Piece(templates.random(), 0)
+        private fun rotate(blocks: List<Block>, times: Int): List<Block> {
+            var current = blocks
+            repeat(times % 4) {
+                // (r, c) -> (c, -r)
+                val rotated = current.map { Block(it.col, -it.row) }
+                val minR = rotated.minOf { it.row }
+                val minC = rotated.minOf { it.col }
+                current = rotated.map { Block(it.row - minR, it.col - minC) }
+            }
+            return current
+        }
+
+        fun random(): Piece {
+            val base = baseTemplates.random()
+            val rotated = rotate(base, (0..3).random())
+            return Piece(rotated, 0)
+        }
 
         fun smartRandom(board: Array<IntArray>): Piece {
-            val shuffled = templates.shuffled()
-            for (template in shuffled) {
-                val p = Piece(template, 0)
-                for (r in 0..BOARD_SIZE - p.height) {
-                    for (c in 0..BOARD_SIZE - p.width) {
-                        if (canFit(p, r, c, board)) return p
+            val shuffledTemplates = baseTemplates.shuffled()
+            for (base in shuffledTemplates) {
+                val rotations = (0..3).shuffled()
+                for (rot in rotations) {
+                    val candidate = rotate(base, rot)
+                    val p = Piece(candidate, 0)
+                    for (r in 0..BOARD_SIZE - p.height) {
+                        for (c in 0..BOARD_SIZE - p.width) {
+                            if (canFit(p, r, c, board)) return p
+                        }
                     }
                 }
             }
@@ -177,8 +193,12 @@ class GameView @JvmOverloads constructor(
     private val PASTEL = listOf(0xFF0014E0.toInt(), 0xFFFF3636.toInt(), 0xFFFFA536.toInt(), 0xFF0FBA00.toInt(), 0xFF2FA4D7.toInt(), 0xFFE76F2E.toInt())
 
     private val bgP     = Paint()
+    private val blobP   = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isDither = true
+    }
     private val cellP   = Paint(Paint.ANTI_ALIAS_FLAG)
     private val blockP  = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val floatP  = Paint(Paint.ANTI_ALIAS_FLAG)
     private val ghostP  = Paint(Paint.ANTI_ALIAS_FLAG)
     private val shadowP = Paint(Paint.ANTI_ALIAS_FLAG)
     private val shineP  = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -205,7 +225,7 @@ class GameView @JvmOverloads constructor(
         isSoundEnabled = prefs().getBoolean("sound_enabled", true)
         loadBitmaps()
         initSounds()
-        
+
         if (!loadGameState()) {
             resetGame()
         }
@@ -289,13 +309,143 @@ class GameView @JvmOverloads constructor(
         if (isGameOver)       drawGameOver(canvas)
     }
 
+    private var bgStartTime = System.currentTimeMillis()
+
+    private class FloatingBlock(
+        var x: Float, var y: Float,
+        var size: Float,
+        var rotation: Float,
+        var rotSpeed: Float,
+        var speedY: Float,
+        val color: Int,
+        val type: Int // 0: 2x2 Square, 1: T-block, 2: Z-block, 3: 4x1 Line
+    )
+
+    private val floatingBlocks = mutableListOf<FloatingBlock>()
+
+    private fun initFloatingBlocks() {
+        if (width <= 0 || height <= 0) return
+        floatingBlocks.clear()
+        val colors = listOf(0x4400ACC1, 0x446A1B9A, 0x44283593, 0x44AD1457)
+        repeat(15) {
+            floatingBlocks.add(createRandomFloatingBlock(colors.random()))
+        }
+    }
+
+    private fun createRandomFloatingBlock(color: Int): FloatingBlock {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        return FloatingBlock(
+            (0..100).random() / 100f * w,
+            (0..100).random() / 100f * h,
+            w * (0.04f + (0..8).random() / 100f),
+            (0..360).random().toFloat(),
+            (5..15).random() / 10f * (if ((0..1).random() == 0) 1 else -1),
+            (10..30).random() / 10f, // Doubled speed
+            color,
+            (0..3).random()
+        )
+    }
+
     private fun drawBg(c: Canvas) {
-        val isDarkMode = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-        val color1 = if (isDarkMode) 0xFF121212.toInt() else 0xFFF0F4F8.toInt()
-        val color2 = if (isDarkMode) 0xFF1E1E1E.toInt() else Color.WHITE
-        bgP.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), color1, color2, Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgP)
-        bgP.shader = null
+        if (floatingBlocks.isEmpty()) initFloatingBlocks()
+        // Base dark background
+        c.drawColor(0xFF080812.toInt())
+
+        val time = (System.currentTimeMillis() - bgStartTime) / 1000f
+        val w = width.toFloat()
+        val h = height.toFloat()
+
+        // 1. Teal/Cyan Blob - Top Left area
+        drawBlob(c,
+            w * 0.25f + Math.sin(time * 0.45).toFloat() * (w * 0.2f),
+            h * 0.35f + Math.cos(time * 0.35).toFloat() * (h * 0.15f),
+            w * 0.85f, 0xFF00ACC1.toInt(), 0.32f)
+
+        // 2. Deep Purple Blob - Bottom Right area
+        drawBlob(c,
+            w * 0.75f + Math.cos(time * 0.3).toFloat() * (w * 0.25f),
+            h * 0.65f + Math.sin(time * 0.4).toFloat() * (h * 0.2f),
+            w * 1.1f, 0xFF6A1B9A.toInt(), 0.28f)
+
+        // 3. Royal Blue Blob - Center area
+        drawBlob(c,
+            w * 0.5f + Math.sin(time * 0.55).toFloat() * (w * 0.3f),
+            h * 0.5f + Math.cos(time * 0.45).toFloat() * (h * 0.25f),
+            w * 0.95f, 0xFF283593.toInt(), 0.25f)
+
+        // 4. Magenta accent - Bottom Left
+        drawBlob(c,
+            w * 0.1f + Math.cos(time * 0.6).toFloat() * (w * 0.15f),
+            h * 0.85f + Math.sin(time * 0.5).toFloat() * (h * 0.1f),
+            w * 0.7f, 0xFFAD1457.toInt(), 0.15f)
+
+        // 5. Floating Blocks
+        drawFloatingBlocks(c, time)
+
+        // Continuous animation
+        postInvalidateOnAnimation()
+    }
+
+    private fun drawFloatingBlocks(c: Canvas, time: Float) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+
+        for (fb in floatingBlocks) {
+            fb.y += fb.speedY
+            fb.rotation += fb.rotSpeed
+
+            if (fb.y - fb.size * 2 > h) {
+                fb.y = -fb.size * 2
+                fb.x = (0..100).random() / 100f * w
+            }
+
+            c.save()
+            c.translate(fb.x, fb.y)
+            c.rotate(fb.rotation)
+
+            val cs = fb.size / 2f // cell size for the blocks
+            val blocks = when (fb.type) {
+                0 -> listOf(Block(0,0), Block(0,1), Block(1,0), Block(1,1)) // 2x2 Square
+                1 -> listOf(Block(0,0), Block(0,1), Block(0,2), Block(1,1)) // T-shape
+                2 -> listOf(Block(0,0), Block(1,0), Block(1,1), Block(2,1)) // Z-shape
+                3 -> listOf(Block(0,0), Block(0,1), Block(0,2), Block(0,3)) // 4x1 Line
+                else -> emptyList()
+            }
+
+            // Calculate center offset to rotate around center of piece
+            val pWidth = blocks.maxOf { it.col } - blocks.minOf { it.col } + 1
+            val pHeight = blocks.maxOf { it.row } - blocks.minOf { it.row } + 1
+            val offsetX = -pWidth * cs / 2f
+            val offsetY = -pHeight * cs / 2f
+
+            for (b in blocks) {
+                val l = offsetX + b.col * cs
+                val t = offsetY + b.row * cs
+                rrRect.set(l + 1f, t + 1f, l + cs - 1f, t + cs - 1f)
+
+                // Use same rendering logic as drawPiece
+                blockP.color = fb.color
+                blockP.alpha = 100 // Semi-transparent for background
+                c.drawRoundRect(rrRect, 6f, 6f, blockP)
+
+                // Add the shine effect from in-game blocks
+                shineP.color = Color.WHITE
+                shineP.alpha = 30
+                c.drawRoundRect(l + 2f, t + 2f, l + cs - 2f, t + 3f, 1f, 1f, shineP)
+            }
+
+            c.restore()
+        }
+    }
+
+    private fun drawBlob(c: Canvas, cx: Float, cy: Float, radius: Float, color: Int, alpha: Float) {
+        if (radius <= 0) return
+        val colors = intArrayOf((alpha * 255).toInt() shl 24 or (color and 0x00FFFFFF), Color.TRANSPARENT)
+        val shader = RadialGradient(cx, cy, radius, colors, null, Shader.TileMode.CLAMP)
+        blobP.shader = shader
+        c.drawCircle(cx, cy, radius, blobP)
+        blobP.shader = null
     }
 
     private fun drawHUD(canvas: Canvas) {
@@ -364,7 +514,7 @@ class GameView @JvmOverloads constructor(
         ringPath.addRoundRect(ringRect, rad, rad, Path.Direction.CW)
         ringPathMeasure.setPath(ringPath, false)
         val total = ringPathMeasure.length
-        
+
         // Target: Start from bottom center, go left & right, meet at top center.
         // On a RoundRect CW path, bottom center is at 0.5 * total + start_offset.
         // Let's adjust offset so 0 is top center.
@@ -373,7 +523,7 @@ class GameView @JvmOverloads constructor(
         val halfLen = (ringFill * total / 2f).coerceIn(0f, total / 2f)
 
         ringDstPath.reset()
-        
+
         // helper to draw segment with wrap-around
         fun addSegment(s: Float, e: Float) {
             val start = (s % total + total) % total
@@ -511,7 +661,7 @@ class GameView @JvmOverloads constructor(
             }
             iconP.alpha = 255
             iconP.color = if (on) COLOR_PRIMARY else 0x40000000; iconP.textSize = r.height() * 0.45f
-            
+
             val abilityBitmap = when (i) {
                 0 -> gravityBitmap
                 2 -> cleanBitmap
@@ -561,10 +711,10 @@ class GameView @JvmOverloads constructor(
         val winW = width * 0.85f
         val winH = height * 0.45f
         val winRect = RectF(cx - winW/2, cy - winH/2, cx + winW/2, cy + winH/2)
-        
+
         bgP.color = 0xFF1A1A3A.toInt()
         canvas.drawRoundRect(winRect, 64f, 64f, bgP)
-        
+
         // Border
         bgP.style = Paint.Style.STROKE
         bgP.color = 0x33FFFFFF
@@ -583,7 +733,7 @@ class GameView @JvmOverloads constructor(
         txtP.color = Color.WHITE
         txtP.textSize = height * 0.09f
         canvas.drawText(scoreNoFmt(score), cx, cy - 20f, txtP)
-        
+
         lblP.textSize = height * 0.018f
         lblP.alpha = 140
         canvas.drawText("POINTS", cx, cy + 40f, lblP)
@@ -597,7 +747,7 @@ class GameView @JvmOverloads constructor(
         gameOverNewGameRect.set(cx - btnW/2, cy + 90f, cx + btnW/2, cy + 90f + btnH)
         bgP.color = COLOR_PRIMARY
         canvas.drawRoundRect(gameOverNewGameRect, 32f, 32f, bgP)
-        
+
         iconP.color = Color.WHITE
         iconP.textSize = height * 0.028f
         iconP.typeface = Typeface.DEFAULT_BOLD
@@ -607,7 +757,7 @@ class GameView @JvmOverloads constructor(
         bgP.color = 0xFF424751.toInt()
         canvas.drawRoundRect(gameOverHomeRect, 32f, 32f, bgP)
         canvas.drawText("HOME", cx, gameOverHomeRect.centerY() + iconP.textSize * 0.35f, iconP)
-        
+
         iconP.typeface = Typeface.DEFAULT
     }
 
@@ -667,12 +817,12 @@ class GameView @JvmOverloads constructor(
         val ly = dragY - cellSize * 2.5f
         ghostCol = ((dragX - boardLeft) / cellSize - piece.width / 2f + 0.5f).toInt()
         ghostRow = ((ly - boardTop) / cellSize - piece.height / 2f + 0.5f).toInt()
-        
+
         ghostRows.clear()
         ghostCols.clear()
-        
+
         canPlace = ly > boardTop && ly < boardTop + cellSize * BOARD_SIZE && canPlacePiece(piece, ghostRow, ghostCol)
-        
+
         if (canPlace) {
             for (r in 0 until BOARD_SIZE) {
                 var full = true
@@ -749,14 +899,14 @@ class GameView @JvmOverloads constructor(
         }
         ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 450
-            addUpdateListener { 
+            addUpdateListener {
                 val v = it.animatedValue as Float
-                clearFlash = v 
+                clearFlash = v
                 clearScale = when {
                     v < 0.3f -> 1f + (v / 0.3f) * 0.15f // Pop
                     else -> ((1f - (v - 0.3f) / 0.7f) * 1.15f).coerceAtLeast(0f) // Shrink
                 }
-                invalidate() 
+                invalidate()
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
@@ -866,9 +1016,9 @@ class GameView @JvmOverloads constructor(
 
     private fun resetGame() {
         for (r in 0 until BOARD_SIZE) board[r].fill(0)
-        for (i in 0 until PIECE_SLOTS) { 
+        for (i in 0 until PIECE_SLOTS) {
             currentPieces[i] = null
-            nextPieces[i] = PieceFactory.random().copy(color = PASTEL.random()) 
+            nextPieces[i] = PieceFactory.random().copy(color = PASTEL.random())
         }
         score = 0; isGameOver = false; clearRunning = false; comboLevel = 0; movesSinceLastClear = 0
         ringFill = 0f; prevRingLevel = 0; ringFlash = 0f
@@ -908,7 +1058,7 @@ class GameView @JvmOverloads constructor(
     private fun loadGameState(): Boolean {
         val pr = prefs()
         if (!pr.getBoolean("has_saved_game", false)) return false
-        
+
         score = pr.getInt("score", 0)
         comboLevel = pr.getInt("comboLevel", 0)
         movesSinceLastClear = pr.getInt("movesSinceLastClear", 0)
@@ -933,7 +1083,7 @@ class GameView @JvmOverloads constructor(
 
         deserializePieces(pr.getString("currentPieces", ""), currentPieces)
         deserializePieces(pr.getString("nextPieces", ""), nextPieces)
-        
+
         ringFill = (score % RING_INTERVAL).toFloat() / RING_INTERVAL
         invalidate()
         return true
