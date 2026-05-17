@@ -137,6 +137,11 @@ class GameView @JvmOverloads constructor(
     private var lastClearAllEarnedAt = 0
     private val abilityRects   = Array(3) { RectF() }
 
+    private var lastAbilityTapTime = 0L
+    private var lastAbilityTapIdx = -1
+    private var lastUndoTapTime = 0L
+    private val DOUBLE_TAP_TIMEOUT = 500L
+
     private val ghostRows = mutableSetOf<Int>()
     private val ghostCols = mutableSetOf<Int>()
     private var draggingIdx = -1
@@ -735,10 +740,34 @@ class GameView @JvmOverloads constructor(
         if (isGameOver) return true
         when (ev.action) {
             MotionEvent.ACTION_DOWN -> {
+                val now = System.currentTimeMillis()
                 if (menuRect.contains(ev.x, ev.y)) { onMenuClicked?.invoke(); return true }
                 if (scoreRect.contains(ev.x, ev.y)) { isScoreVisible = !isScoreVisible; invalidate(); return true }
-                if (undoRect.contains(ev.x, ev.y)) { doUndo(); return true }
-                for (i in 0..2) if (abilityRects[i].contains(ev.x, ev.y)) { activateAbility(i); return true }
+                
+                if (undoRect.contains(ev.x, ev.y)) {
+                    if (now - lastUndoTapTime < DOUBLE_TAP_TIMEOUT) {
+                        doUndo()
+                        lastUndoTapTime = 0
+                    } else {
+                        lastUndoTapTime = now
+                    }
+                    return true
+                }
+
+                for (i in 0..2) {
+                    if (abilityRects[i].contains(ev.x, ev.y)) {
+                        if (i == lastAbilityTapIdx && now - lastAbilityTapTime < DOUBLE_TAP_TIMEOUT) {
+                            activateAbility(i)
+                            lastAbilityTapIdx = -1
+                            lastAbilityTapTime = 0
+                        } else {
+                            lastAbilityTapIdx = i
+                            lastAbilityTapTime = now
+                        }
+                        return true
+                    }
+                }
+
                 if (ev.y > boardTop + cellSize * BOARD_SIZE) onDown(ev.x, ev.y)
             }
             MotionEvent.ACTION_MOVE -> onMove(ev.x, ev.y)
