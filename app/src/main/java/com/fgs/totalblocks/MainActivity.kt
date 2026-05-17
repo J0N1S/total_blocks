@@ -39,6 +39,13 @@ class MainActivity : AppCompatActivity() {
             showMenu(false)
         }
 
+        gameView.onGameOver = { score ->
+            runOnUiThread {
+                showMenu(true)
+                menuWebView?.evaluateJavascript("showGameOver($score)", null)
+            }
+        }
+
         // Initialize WebView once
         setupMenuWebView()
 

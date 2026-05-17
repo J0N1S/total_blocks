@@ -31,6 +31,7 @@ class GameView @JvmOverloads constructor(
 
     var onMenuClicked: (() -> Unit)? = null
     var onHomeClicked: (() -> Unit)? = null
+    var onGameOver: ((Int) -> Unit)? = null
 
     @Volatile
     var isVibrationEnabled: Boolean = true
@@ -308,7 +309,6 @@ class GameView @JvmOverloads constructor(
         drawAbilities(canvas)
         drawUndo(canvas)
         if (draggingIdx >= 0) drawDrag(canvas)
-        if (isGameOver)       drawGameOver(canvas)
     }
 
     private fun updateTimer() {
@@ -324,6 +324,7 @@ class GameView @JvmOverloads constructor(
                 timeLeftMillis = 0
                 isGameOver = true
                 invalidate()
+                onGameOver?.invoke(score)
             }
         }
         lastFrameTime = now
@@ -730,82 +731,8 @@ class GameView @JvmOverloads constructor(
         }
     }
 
-    private val gameOverNewGameRect = RectF()
-    private val gameOverHomeRect = RectF()
-
-    private fun drawGameOver(canvas: Canvas) {
-        // Dark Overlay
-        bgP.color = 0xDD0D0D1A.toInt()
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgP)
-
-        val cx = width / 2f
-        val cy = height / 2f
-
-        // Game Over Window
-        val winW = width * 0.85f
-        val winH = height * 0.45f
-        val winRect = RectF(cx - winW/2, cy - winH/2, cx + winW/2, cy + winH/2)
-
-        bgP.color = 0xFF1A1A3A.toInt()
-        canvas.drawRoundRect(winRect, 64f, 64f, bgP)
-
-        // Border
-        bgP.style = Paint.Style.STROKE
-        bgP.color = 0x33FFFFFF
-        bgP.strokeWidth = 4f
-        canvas.drawRoundRect(winRect, 64f, 64f, bgP)
-        bgP.style = Paint.Style.FILL
-
-        // Title
-        lblP.color = Color.WHITE
-        lblP.textSize = height * 0.022f
-        lblP.alpha = 160
-        canvas.drawText("GAME OVER", cx, cy - winH/2 + 80f, lblP)
-        lblP.alpha = 255
-
-        // Score
-        txtP.color = Color.WHITE
-        txtP.textSize = height * 0.09f
-        canvas.drawText(scoreNoFmt(score), cx, cy - 20f, txtP)
-
-        lblP.textSize = height * 0.018f
-        lblP.alpha = 140
-        canvas.drawText("POINTS", cx, cy + 40f, lblP)
-        lblP.alpha = 255
-
-        // Buttons
-        val btnW = winW * 0.75f
-        val btnH = 100f
-        val btnSpacing = 30f
-
-        gameOverNewGameRect.set(cx - btnW/2, cy + 90f, cx + btnW/2, cy + 90f + btnH)
-        bgP.color = COLOR_PRIMARY
-        canvas.drawRoundRect(gameOverNewGameRect, 32f, 32f, bgP)
-
-        iconP.color = Color.WHITE
-        iconP.textSize = height * 0.028f
-        iconP.typeface = Typeface.DEFAULT_BOLD
-        canvas.drawText("NEW GAME", cx, gameOverNewGameRect.centerY() + iconP.textSize * 0.35f, iconP)
-
-        gameOverHomeRect.set(cx - btnW/2, gameOverNewGameRect.bottom + btnSpacing, cx + btnW/2, gameOverNewGameRect.bottom + btnSpacing + btnH)
-        bgP.color = 0xFF424751.toInt()
-        canvas.drawRoundRect(gameOverHomeRect, 32f, 32f, bgP)
-        canvas.drawText("HOME", cx, gameOverHomeRect.centerY() + iconP.textSize * 0.35f, iconP)
-
-        iconP.typeface = Typeface.DEFAULT
-    }
-
     override fun onTouchEvent(ev: MotionEvent): Boolean {
-        if (isGameOver) {
-            if (ev.action == MotionEvent.ACTION_UP) {
-                if (gameOverNewGameRect.contains(ev.x, ev.y)) {
-                    startNewGame()
-                } else if (gameOverHomeRect.contains(ev.x, ev.y)) {
-                    onHomeClicked?.invoke()
-                }
-            }
-            return true
-        }
+        if (isGameOver) return true
         when (ev.action) {
             MotionEvent.ACTION_DOWN -> {
                 if (menuRect.contains(ev.x, ev.y)) { onMenuClicked?.invoke(); return true }
@@ -958,7 +885,14 @@ class GameView @JvmOverloads constructor(
         }.start()
     }
 
-    private fun evalGameOver() { if (!isGameOver && !clearRunning && isGameOverNow()) { isGameOver = true; vibrate(500); invalidate() } }
+    private fun evalGameOver() {
+        if (!isGameOver && !clearRunning && isGameOverNow()) {
+            isGameOver = true
+            vibrate(500)
+            invalidate()
+            onGameOver?.invoke(score)
+        }
+    }
 
     private fun updateRing() {
         val lvl = score / RING_INTERVAL

@@ -5,284 +5,541 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Total Blocks Menu</title>
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            width: 100vw;
-            height: 100vh;
-            background: #0D0D1A;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            color: white;
-            overflow: hidden;
-            position: relative;
-            touch-action: none;
-            user-select: none;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+          width: 100%; height: 100vh; overflow: hidden;
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          color: white; background: #0D0D1A;
+          display: flex; justify-content: center; align-items: center;
+          touch-action: none; user-select: none;
+        }
+        #bg-canvas {
+          position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+          z-index: 0; image-rendering: pixelated; image-rendering: crisp-edges;
         }
 
-        /* Animated Background Elements */
-        .bg-circle {
-            position: absolute;
-            border-radius: 50%;
-            filter: blur(60px);
-            z-index: 0;
-            animation: move 20s infinite alternate ease-in-out;
-            opacity: 0.4;
+        /* ── Panel ── */
+        .panel {
+          position: relative; z-index: 10;
+          width: 88%; max-width: 360px;
+          background: rgba(8, 8, 22, 0.82);
+          border: 1px solid rgba(78, 180, 255, 0.18);
+          border-radius: 4px;
+          padding: 28px 22px 24px;
+          box-shadow: 0 0 0 3px rgba(78,180,255,0.06), inset 0 0 40px rgba(0,0,0,0.4);
         }
-        .circle-1 { width: 300px; height: 300px; background: #215FA6; top: -100px; left: -100px; }
-        .circle-2 { width: 250px; height: 250px; background: #336857; bottom: -50px; right: -50px; animation-duration: 25s; }
-        .circle-3 { width: 200px; height: 200px; background: #69333A; top: 40%; right: 10%; animation-duration: 15s; }
-
-        @keyframes move {
-            from { transform: translate(0, 0) rotate(0deg); }
-            to { transform: translate(100px, 100px) rotate(360deg); }
+        /* pixel corner decorations */
+        .panel::before, .panel::after {
+          content: ''; position: absolute; width: 8px; height: 8px;
+          background: #4ec6ff;
         }
+        .panel::before { top: -1px; left: -1px; }
+        .panel::after  { bottom: -1px; right: -1px; }
+        .panel-corner-tr, .panel-corner-bl {
+          position: absolute; width: 8px; height: 8px; background: #4ec6ff;
+        }
+        .panel-corner-tr { top: -1px; right: -1px; }
+        .panel-corner-bl { bottom: -1px; left: -1px; }
 
-        .welcome-container {
-            position: relative;
-            z-index: 10;
-            text-align: center;
-            background: rgba(255, 255, 255, 0.05);
-            padding: 40px 30px;
-            border-radius: 32px;
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            width: 85%;
-            max-width: 360px;
-            min-height: 500px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
+        /* ── Logo area ── */
+        .logo-area {
+          text-align: center; margin-bottom: 24px; position: relative;
         }
 
-        .page {
-            display: none;
-            width: 100%;
-            height: 100%;
-            flex-direction: column;
-            justify-content: center;
+        .logo-title {
+          font-size: 38px; font-weight: 900; letter-spacing: 2px;
+          text-transform: uppercase; color: #fff; line-height: 1;
+          font-stretch: condensed;
+          text-shadow: 3px 3px 0px rgba(0,0,0,0.6), 0 0 24px rgba(78,198,255,0.35);
+          font-variant: small-caps;
+        }
+        .logo-sub {
+          font-size: 10px; letter-spacing: 3px; color: rgba(78,198,255,0.6);
+          margin-top: 3px; text-transform: uppercase;
         }
 
-        .page.active {
-            display: flex;
-        }
+        /* ── Pages ── */
+        .page { display: none; flex-direction: column; }
+        .page.active { display: flex; }
 
-        h1 {
-            font-size: 36px;
-            margin-bottom: 30px;
-            margin-top: 0;
-            background: linear-gradient(to right, #215FA6, #4A90E2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            font-weight: 900;
+        /* ── Mode cards ── */
+        .mode-card {
+          display: flex; align-items: center;
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-left: 3px solid #4ec6ff;
+          border-radius: 3px;
+          padding: 12px 14px;
+          margin-bottom: 10px;
+          cursor: pointer;
+          transition: background 0.15s, transform 0.1s, border-left-color 0.15s;
+          position: relative; overflow: hidden;
         }
+        .mode-card:active { transform: scale(0.97); background: rgba(255,255,255,0.08); }
+        .mode-card.green  { border-left-color: #3dd68c; }
+        .mode-card.amber  { border-left-color: #f0a500; }
+        .mode-card.locked { border-left-color: rgba(255,255,255,0.15); opacity: 0.45; cursor: default; }
+        .mode-card:active.locked { transform: none; }
 
-        h2 {
-            font-size: 24px;
-            margin-bottom: 30px;
-            color: white;
-            text-transform: uppercase;
-            letter-spacing: 1px;
+        /* pixel icon */
+        .card-icon {
+          width: 42px; height: 42px; flex-shrink: 0;
+          display: grid; grid-template-columns: repeat(5, 1fr);
+          grid-template-rows: repeat(5, 1fr);
+          gap: 2px; margin-right: 14px;
         }
+        .pix { border-radius: 1px; }
 
-        .btn {
-            display: block;
-            width: 100%;
-            padding: 14px 0;
-            margin: 12px 0;
-            font-size: 16px;
-            font-weight: bold;
-            color: white;
-            background: #215FA6;
-            border: none;
-            border-radius: 16px;
-            cursor: pointer;
-            box-sizing: border-box;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 15px rgba(33, 95, 166, 0.2);
-            text-transform: uppercase;
+        .card-info { flex: 1; }
+        .card-title { font-size: 15px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+        .card-desc  { font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 2px; letter-spacing: 1px; }
+
+        .card-arrow {
+          font-size: 18px; color: rgba(255,255,255,0.25); margin-left: 8px; flex-shrink: 0;
         }
+        .mode-card:not(.locked):active .card-arrow { color: rgba(255,255,255,0.6); }
 
-        .btn:active {
-            transform: scale(0.96);
+        /* resume card */
+        .resume-card {
+          display: none;
+          align-items: center;
+          background: rgba(51,104,87,0.3);
+          border: 1px solid rgba(61,214,140,0.25);
+          border-left: 3px solid #3dd68c;
+          border-radius: 3px;
+          padding: 11px 14px;
+          margin-bottom: 14px;
+          cursor: pointer;
+          transition: background 0.15s, transform 0.1s;
         }
+        .resume-card.visible { display: flex; }
+        .resume-card:active { transform: scale(0.97); }
+        .resume-icon { font-size: 20px; margin-right: 12px; }
+        .resume-title { font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #3dd68c; }
+        .resume-sub   { font-size: 10px; color: rgba(61,214,140,0.5); margin-top: 1px; letter-spacing: 1px; }
 
-        .btn-resume { background: #336857; box-shadow: 0 4px 15px rgba(51, 104, 87, 0.2); }
-        .btn-home { background: #424751; box-shadow: 0 4px 15px rgba(66, 71, 81, 0.2); }
-        .btn-back { background: transparent; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: none; margin-top: 20px; }
-
-        .btn-disabled {
-            background: rgba(255, 255, 255, 0.05);
-            color: rgba(255, 255, 255, 0.3);
-            cursor: default;
-            box-shadow: none;
-            border: 1px solid rgba(255, 255, 255, 0.05);
+        /* divider */
+        .divider {
+          display: flex; align-items: center; gap: 10px; margin: 4px 0 12px;
         }
+        .divider-line { flex: 1; height: 1px; background: rgba(255,255,255,0.07); }
+        .divider-text { font-size: 9px; letter-spacing: 2px; color: rgba(255,255,255,0.25); text-transform: uppercase; }
 
-        .coming-soon {
-            display: block;
-            font-size: 10px;
-            opacity: 0.7;
-            margin-top: 2px;
-        }
 
-        /* Settings UI */
-        .control-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 25px;
-            padding: 0 10px;
-        }
 
-        .control-label {
-            font-size: 15px;
-            font-weight: bold;
-            color: #aaa;
-            text-transform: uppercase;
-        }
+        /* ── In-game view uses .mode-card ── */
 
-        .toggle-switch { position: relative; display: inline-block; width: 50px; height: 28px; }
-        .toggle-switch input { opacity: 0; width: 0; height: 0; }
-        .slider {
-            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-            background-color: #333; transition: .4s; border-radius: 28px;
+        /* ── Settings ── */
+        .settings-title { font-size: 12px; letter-spacing: 3px; color: rgba(255,255,255,0.4); text-transform: uppercase; text-align: center; margin-bottom: 22px; }
+        .setting-row {
+          display: flex; justify-content: space-between; align-items: center;
+          padding: 14px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
         }
-        .slider:before {
-            position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px;
-            background-color: white; transition: .4s; border-radius: 50%;
-        }
-        input:checked + .slider { background-color: #215FA6; }
-        input:checked + .slider:before { transform: translateX(22px); }
+        .setting-row:last-of-type { border-bottom: none; }
+        .setting-label { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: rgba(255,255,255,0.65); }
+        .setting-label svg { width: 18px; height: 18px; opacity: 0.5; flex-shrink: 0; }
 
+        /* pixel toggle */
+        .px-toggle { position: relative; width: 46px; height: 24px; cursor: pointer; }
+        .px-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .px-track {
+          position: absolute; inset: 0;
+          background: #111827; border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 2px; transition: background .25s;
+        }
+        .px-thumb {
+          position: absolute; top: 3px; left: 3px;
+          width: 16px; height: 16px; border-radius: 1px;
+          background: rgba(255,255,255,0.2); transition: transform .25s, background .25s;
+        }
+        .px-toggle input:checked ~ .px-track { background: #0e3a5c; border-color: rgba(78,198,255,0.3); }
+        .px-toggle input:checked ~ .px-thumb { transform: translateX(22px); background: #4ec6ff; }
+
+        .back-btn {
+          display: flex; align-items: center; justify-content: center; gap: 8px;
+          margin-top: 18px; padding: 10px;
+          background: transparent; border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: 700;
+          letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,0.4);
+          transition: background .15s, transform .1s;
+        }
+        .back-btn:active { background: rgba(255,255,255,0.05); transform: scale(0.97); }
     </style>
 </head>
 <body>
-    <div class="bg-circle circle-1"></div>
-    <div class="bg-circle circle-2"></div>
-    <div class="bg-circle circle-3"></div>
 
-    <div class="welcome-container">
+<canvas id="bg-canvas"></canvas>
 
-        <!-- MAIN MENU PAGE -->
-        <div id="mainMenu" class="page active">
-            <h1>Total Blocks</h1>
+<div class="panel">
+    <span class="panel-corner-tr"></span>
+    <span class="panel-corner-bl"></span>
 
-            <!-- Contextual layout controlled by setIsInGame -->
-            <div id="inGameView" style="display:none;">
-                <button class="btn btn-resume" onclick="Android.closeMenu()">RESUME</button>
-                <button class="btn btn-home" onclick="goHome()">HOME</button>
-                <button class="btn" onclick="showPage('settingsPage')">SETTINGS</button>
+    <!-- ══ MAIN MENU ══ -->
+    <div id="mainMenu" class="page active">
+
+        <!-- Logo -->
+        <div class="logo-area">
+            <div class="logo-title">Total<br>Blocks</div>
+            <div class="logo-sub" id="logoSub">puzzle game</div>
+        </div>
+
+        <!-- In-game view -->
+        <div id="inGameView" style="display:none;">
+            <div class="divider" style="margin-bottom:14px;">
+                <div class="divider-line"></div>
+                <div class="divider-text">paused</div>
+                <div class="divider-line"></div>
             </div>
 
-            <div id="welcomeView">
-                <button class="btn" onclick="Android.newGame()">CLASSIC</button>
-                <button id="welcomeResume" class="btn btn-resume" style="display:none;" onclick="Android.closeMenu()">RESUME</button>
-                <button class="btn" onclick="Android.startTimeAttack()">
-                    TIME ATTACK
-                </button>
-                <button class="btn btn-disabled">
-                    FRIEND FIGHT <span class="coming-soon">(Coming Soon)</span>
-                </button>
-                <button class="btn" onclick="showPage('settingsPage')">SETTINGS</button>
+            <div class="mode-card green" onclick="Android&&Android.closeMenu()">
+                <div class="card-icon" id="icon-resume"></div>
+                <div class="card-info">
+                    <div class="card-title">Resume</div>
+                    <div class="card-desc">continue your game</div>
+                </div>
+                <div class="card-arrow">›</div>
+            </div>
+
+            <div class="mode-card" style="border-left-color:#8888aa;" onclick="goHome()">
+                <div class="card-icon" id="icon-home"></div>
+                <div class="card-info">
+                    <div class="card-title">Main Menu</div>
+                    <div class="card-desc">exit to menu</div>
+                </div>
+                <div class="card-arrow">›</div>
+            </div>
+
+            <div class="mode-card" style="border-left-color:#8888aa;" onclick="showPage('settingsPage')">
+                <div class="card-icon" id="icon-settings2"></div>
+                <div class="card-info">
+                    <div class="card-title">Settings</div>
+                    <div class="card-desc">sound · vibration</div>
+                </div>
+                <div class="card-arrow">›</div>
             </div>
         </div>
 
-        <!-- SETTINGS PAGE -->
-        <div id="settingsPage" class="page">
-            <h2>Settings</h2>
+        <!-- Welcome view -->
+        <div id="welcomeView">
 
-            <div class="control-row">
-                <span class="control-label">Vibration</span>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="vibrationToggle" checked onchange="Android.setVibrationEnabled(this.checked)">
-                    <span class="slider"></span>
-                </label>
+            <!-- Resume (shown if saved game) -->
+            <div id="welcomeResume" class="resume-card" onclick="Android&&Android.closeMenu()">
+                <div class="resume-icon">▶</div>
+                <div>
+                    <div class="resume-title">Continue</div>
+                    <div class="resume-sub">resume saved game</div>
+                </div>
             </div>
 
-            <div class="control-row">
-                <span class="control-label">Sound</span>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="soundToggle" checked onchange="Android.setSoundEnabled(this.checked)">
-                    <span class="slider"></span>
-                </label>
+            <div class="divider">
+                <div class="divider-line"></div>
+                <div class="divider-text">select mode</div>
+                <div class="divider-line"></div>
             </div>
 
-            <button class="btn btn-back" onclick="showPage('mainMenu')">BACK</button>
+            <!-- CLASSIC -->
+            <div class="mode-card" onclick="Android&&Android.newGame()">
+                <div class="card-icon" id="icon-classic"></div>
+                <div class="card-info">
+                    <div class="card-title">Classic</div>
+                    <div class="card-desc">clear the board · endless</div>
+                </div>
+                <div class="card-arrow">›</div>
+            </div>
+
+            <!-- TIME ATTACK -->
+            <div class="mode-card amber" onclick="Android&&Android.startTimeAttack()">
+                <div class="card-icon" id="icon-time"></div>
+                <div class="card-info">
+                    <div class="card-title">Time Attack</div>
+                    <div class="card-desc">beat the clock · survive</div>
+                </div>
+                <div class="card-arrow">›</div>
+            </div>
+
+            <!-- FRIEND FIGHT -->
+            <div class="mode-card locked">
+                <div class="card-icon" id="icon-versus"></div>
+                <div class="card-info">
+                    <div class="card-title">Friend Fight</div>
+                    <div class="card-desc">coming soon · 1v1 battle</div>
+                </div>
+                <div class="card-arrow" style="font-size:13px;">🔒</div>
+            </div>
+
+            <!-- Settings card -->
+            <div class="mode-card" style="border-left-color:#8888aa;" onclick="showPage('settingsPage')">
+                <div class="card-icon" id="icon-settings"></div>
+                <div class="card-info">
+                    <div class="card-title">Settings</div>
+                    <div class="card-desc">sound · vibration</div>
+                </div>
+                <div class="card-arrow">›</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══ SETTINGS ══ -->
+    <div id="settingsPage" class="page">
+        <div class="logo-area" style="margin-bottom:18px;">
+            <div class="logo-title" style="font-size:20px; letter-spacing:3px;">Settings</div>
+        </div>
+
+        <div class="setting-row">
+            <div class="setting-label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 11-3.09 19.5"/><path d="M12 6v6l4 2"/></svg>
+                Vibration
+            </div>
+            <label class="px-toggle">
+                <input type="checkbox" id="vibrationToggle" checked onchange="Android&&Android.setVibrationEnabled(this.checked)">
+                <div class="px-track"></div>
+                <div class="px-thumb"></div>
+            </label>
+        </div>
+
+        <div class="setting-row">
+            <div class="setting-label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14"/></svg>
+                Sound
+            </div>
+            <label class="px-toggle">
+                <input type="checkbox" id="soundToggle" checked onchange="Android&&Android.setSoundEnabled(this.checked)">
+                <div class="px-track"></div>
+                <div class="px-thumb"></div>
+            </label>
+        </div>
+
+        <div class="back-btn" onclick="showPage('mainMenu')">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+            Back
+        </div>
+    </div>
+
+    <!-- ══ GAME OVER ══ -->
+    <div id="gameOverPage" class="page">
+
+        <div class="logo-area">
+            <div class="logo-title" style="color:#e05555; text-shadow: 3px 3px 0px rgba(0,0,0,0.6), 0 0 24px rgba(220,80,80,0.4);">Game<br>Over</div>
+            <div class="logo-sub" id="gameOverSub">better luck next time</div>
+        </div>
+
+        <div id="gameOverScoreArea" style="text-align:center; margin-bottom:20px;">
+            <div style="font-size:12px; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:2px;">Final Score</div>
+            <div id="finalScore" style="font-size:48px; font-weight:900; color:#fff; margin-top:5px;">0</div>
+        </div>
+
+        <div class="divider" style="margin-bottom:16px;">
+            <div class="divider-line"></div>
+            <div class="divider-text">what's next</div>
+            <div class="divider-line"></div>
+        </div>
+
+        <div class="mode-card green" onclick="Android&&Android.newGame()">
+            <div class="card-icon" id="icon-newgame"></div>
+            <div class="card-info">
+                <div class="card-title">New Game</div>
+                <div class="card-desc">play again · fresh start</div>
+            </div>
+            <div class="card-arrow">›</div>
+        </div>
+
+        <div class="mode-card" style="border-left-color:#8888aa;" onclick="goHome()">
+            <div class="card-icon" id="icon-home2"></div>
+            <div class="card-info">
+                <div class="card-title">Main Menu</div>
+                <div class="card-desc">exit to menu</div>
+            </div>
+            <div class="card-arrow">›</div>
         </div>
 
     </div>
 
-    <script>
-        let isCurrentlyInGame = false;
+</div>
 
-        function showPage(pageId) {
-            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-            document.getElementById(pageId).classList.add('active');
+<script>
+    /* ── Pixel icons ────────────────────────────────────────────── */
+    function makeIcon(containerId, pattern, colors) {
+      var el = document.getElementById(containerId);
+      if (!el) return;
+      pattern.forEach(function(row, r) {
+        row.forEach(function(col, c) {
+          var div = document.createElement('div');
+          div.className = 'pix';
+          div.style.background = col > 0 ? colors[col - 1] : 'transparent';
+          el.appendChild(div);
+        });
+      });
+    }
+
+    /* Classic: tetromino stack */
+    makeIcon('icon-classic', [
+      [0,1,1,0,0],
+      [0,1,1,0,0],
+      [2,2,1,1,0],
+      [2,2,3,3,0],
+      [0,0,3,3,0]
+    ], ['#4ec6ff','#2d8abf','#1a5c8a']);
+
+    /* Time Attack: clock shape */
+    makeIcon('icon-time', [
+      [0,1,1,1,0],
+      [1,0,2,0,1],
+      [1,2,2,0,1],
+      [1,0,0,0,1],
+      [0,1,1,1,0]
+    ], ['#f0a500','#fff','#c07800']);
+
+    /* Friend Fight: two people facing VS */
+    makeIcon('icon-versus', [
+      [1,0,0,0,2],
+      [1,1,0,2,2],
+      [0,1,3,2,0],
+      [1,1,3,2,2],
+      [1,0,3,0,2]
+    ], ['rgba(180,180,255,0.55)','rgba(255,160,100,0.55)','rgba(255,255,255,0.7)']);
+
+    /* Settings: gear pixel icon */
+    makeIcon('icon-settings', [
+      [0,0,1,0,0],
+      [1,2,2,2,1],
+      [0,2,2,2,0],
+      [1,2,2,2,1],
+      [0,0,1,0,0]
+    ], ['#8888aa','#666688','#aaaabb']);
+
+    /* Resume: play triangle in blocks */
+    makeIcon('icon-resume', [
+      [1,0,0,0,0],
+      [1,1,0,0,0],
+      [1,1,1,2,0],
+      [1,1,0,0,0],
+      [1,0,0,0,0]
+    ], ['#3dd68c','#2aaa6e']);
+
+    /* Home: house shape */
+    makeIcon('icon-home', [
+      [0,0,1,0,0],
+      [0,1,1,1,0],
+      [1,1,1,1,1],
+      [0,1,2,1,0],
+      [0,1,2,1,0]
+    ], ['#8888cc','#555588']);
+
+    /* Settings2: same as settings gear */
+    makeIcon('icon-settings2', [
+      [0,0,1,0,0],
+      [1,2,2,2,1],
+      [0,2,2,2,0],
+      [1,2,2,2,1],
+      [0,0,1,0,0]
+    ], ['#8888aa','#666688','#aaaabb']);
+
+    /* New Game: plus / refresh in blocks */
+    makeIcon('icon-newgame', [
+      [0,0,1,0,0],
+      [0,0,1,0,0],
+      [1,1,1,1,1],
+      [0,0,1,0,0],
+      [0,0,1,0,0]
+    ], ['#3dd68c','#2aaa6e']);
+
+    /* Home2: same house icon as home */
+    makeIcon('icon-home2', [
+      [0,0,1,0,0],
+      [0,1,1,1,0],
+      [1,1,1,1,1],
+      [0,1,2,1,0],
+      [0,1,2,1,0]
+    ], ['#8888cc','#555588']);
+
+    /* ── Canvas background ──────────────────────────────────────── */
+    var canvas = document.getElementById('bg-canvas');
+    var ctx = canvas.getContext('2d');
+    var BLOCK = 18, cols, rows, t = 0;
+
+    function noise(x, y, time) {
+      var n = 0;
+      n += Math.sin(x * 0.8 + time * 0.7) * Math.cos(y * 0.6 + time * 0.5) * 0.50;
+      n += Math.sin(x * 0.3 - time * 0.4 + y * 0.4) * 0.30;
+      n += Math.cos(x * 1.2 + y * 0.9   + time * 0.9) * 0.15;
+      n += Math.sin((x + y) * 0.5 + time * 0.3) * 0.10;
+      return (n + 1.0) / 2.0;
+    }
+    function terrainColor(v) {
+      v = Math.floor(v * 8) / 8;
+      var f, r, g, b;
+      if (v < 0.125)      { f=v/0.125;          r=5;  g=Math.round(8+f*12);   b=Math.round(30+f*40); }
+      else if (v < 0.25)  { f=(v-.125)/.125;    r=8;  g=Math.round(20+f*20);  b=Math.round(70+f*50); }
+      else if (v < 0.375) { f=(v-.25)/.125;     r=10; g=Math.round(40+f*30);  b=Math.round(120+f*50);}
+      else if (v < 0.5)   { f=(v-.375)/.125;    r=12; g=Math.round(70+f*40);  b=Math.round(170+f*30);}
+      else if (v < 0.625) { f=(v-.5)/.125;      r=15; g=Math.round(110+f*50); b=Math.round(200+f*20);}
+      else if (v < 0.75)  { f=(v-.625)/.125;    r=Math.round(15+f*15); g=Math.round(160+f*40); b=Math.round(220+f*10); }
+      else if (v < 0.875) { f=(v-.75)/.125;     r=Math.round(30+f*20); g=Math.round(200+f*30); b=230; }
+      else                { f=(v-.875)/.125;    r=Math.round(50+f*30); g=Math.round(230+f*20); b=Math.round(230-f*10); }
+      return 'rgb('+r+','+g+','+b+')';
+    }
+    function resize() {
+      canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+      cols = Math.ceil(canvas.width/BLOCK)+1; rows = Math.ceil(canvas.height/BLOCK)+1;
+    }
+    function draw() {
+      t += 0.022;
+      for (var row=0; row<rows; row++)
+        for (var col=0; col<cols; col++) {
+          ctx.fillStyle = terrainColor(noise(col*0.4, row*0.4, t));
+          ctx.fillRect(col*BLOCK, row*BLOCK, BLOCK, BLOCK);
         }
+      requestAnimationFrame(draw);
+    }
+    window.addEventListener('resize', resize);
+    resize(); draw();
 
-        function goHome() {
-            isCurrentlyInGame = false;
-            updateUI();
-        }
+    /* ── Menu logic ─────────────────────────────────────────────── */
+    var isCurrentlyInGame = false;
+    function showPage(id) {
+      document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
+      document.getElementById(id).classList.add('active');
+    }
+    function goHome() {
+      isCurrentlyInGame = false;
+      showPage('mainMenu');
+      updateUI();
+    }
+    function setIsInGame(v) {
+      isCurrentlyInGame = v;
+      showPage('mainMenu');
+      updateUI();
+    }
+    function setHasSavedGame(v) {
+      var el = document.getElementById('welcomeResume');
+      el.classList.toggle('visible', !!v);
+    }
+    function updateUI() {
+      document.getElementById('inGameView').style.display  = isCurrentlyInGame ? 'block' : 'none';
+      document.getElementById('welcomeView').style.display = isCurrentlyInGame ? 'none'  : 'block';
+      document.getElementById('logoSub').textContent = isCurrentlyInGame ? '— paused —' : 'puzzle game';
+      if (!isCurrentlyInGame && typeof Android!=='undefined' && Android.requestSavedGameState)
+        Android.requestSavedGameState();
+    }
+    function showGameOver(score, subtitle) {
+      showPage('gameOverPage');
+      if (score !== undefined) document.getElementById('finalScore').textContent = score;
+      if (subtitle) document.getElementById('gameOverSub').textContent = subtitle;
+    }
 
-        function setIsInGame(inGame) {
-            isCurrentlyInGame = inGame;
-            updateUI();
-        }
-
-        function setHasSavedGame(hasSaved) {
-            const welcomeResume = document.getElementById('welcomeResume');
-            welcomeResume.style.display = hasSaved ? 'block' : 'none';
-        }
-
-        function updateUI() {
-            const inGameView = document.getElementById('inGameView');
-            const welcomeView = document.getElementById('welcomeView');
-
-            if (isCurrentlyInGame) {
-                inGameView.style.display = 'block';
-                welcomeView.style.display = 'none';
-            } else {
-                inGameView.style.display = 'none';
-                welcomeView.style.display = 'block';
-                // Request saved state only when returning home
-                if (typeof Android !== 'undefined' && typeof Android.requestSavedGameState === 'function') {
-                    Android.requestSavedGameState();
-                }
-            }
-        }
-
-        function setToggleState(type, enabled) {
-            if (type === 'vibration') {
-                document.getElementById('vibrationToggle').checked = enabled;
-            } else if (type === 'sound') {
-                document.getElementById('soundToggle').checked = enabled;
-            }
-        }
-
-        function onMenuOpen() {
-            if (typeof Android !== 'undefined') {
-                if (typeof Android.requestVibrationState === 'function') Android.requestVibrationState();
-                if (typeof Android.requestSoundState === 'function') Android.requestSoundState();
-                if (!isCurrentlyInGame && typeof Android.requestSavedGameState === 'function') {
-                    Android.requestSavedGameState();
-                }
-            }
-        }
-
-        window.onload = onMenuOpen;
-
-        document.addEventListener('touchmove', function(e) {
-            e.preventDefault();
-        }, { passive: false });
-    </script>
+    function setToggleState(type, enabled) {
+      if (type==='vibration') document.getElementById('vibrationToggle').checked = enabled;
+      else if (type==='sound') document.getElementById('soundToggle').checked = enabled;
+    }
+    function onMenuOpen() {
+      if (typeof Android !== 'undefined') {
+        if (Android.requestVibrationState) Android.requestVibrationState();
+        if (Android.requestSoundState)     Android.requestSoundState();
+        if (!isCurrentlyInGame && Android.requestSavedGameState) Android.requestSavedGameState();
+      }
+    }
+    window.onload = onMenuOpen;
+    document.addEventListener('touchmove', function(e){ e.preventDefault(); }, { passive: false });
+</script>
 </body>
 </html>
