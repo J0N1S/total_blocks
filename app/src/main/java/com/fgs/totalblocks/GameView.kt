@@ -51,6 +51,16 @@ class GameView @JvmOverloads constructor(
             }
         }
 
+    @Volatile
+    var isAnimationEnabled: Boolean = true
+        set(value) {
+            if (field != value) {
+                field = value
+                prefs().edit().putBoolean("animation_enabled", value).apply()
+                invalidate()
+            }
+        }
+
     data class Block(val row: Int, val col: Int)
     data class Piece(val blocks: List<Block>, val color: Int) {
         val width: Int  by lazy { blocks.maxOf { it.col } - blocks.minOf { it.col } + 1 }
@@ -230,6 +240,7 @@ class GameView @JvmOverloads constructor(
         bestScore = prefs().getInt("best", 0)
         isVibrationEnabled = prefs().getBoolean("vibration_enabled", true)
         isSoundEnabled = prefs().getBoolean("sound_enabled", true)
+        isAnimationEnabled = prefs().getBoolean("animation_enabled", true)
         loadBitmaps()
         initSounds()
 
@@ -376,6 +387,13 @@ class GameView @JvmOverloads constructor(
 
     private fun drawBg(c: Canvas) {
         if (floatingBlocks.isEmpty()) initFloatingBlocks()
+
+        if (!isAnimationEnabled) {
+            // Dark Royal Blue solid background
+            c.drawColor(0xFF002366.toInt())
+            return
+        }
+
         // Base dark background
         c.drawColor(0xFF080812.toInt())
 
@@ -678,27 +696,34 @@ class GameView @JvmOverloads constructor(
         val charges = listOf(gravityCharges, tripleCharges, clearAllCharges)
         val steps = listOf(GRAVITY_STEP, TRIPLE_STEP, CLEAR_ALL_STEP)
         val lasts = listOf(lastGravityEarnedAt, lastTripleEarnedAt, lastClearAllEarnedAt)
+        
+        // Time Attack Costs
+        val costs = listOf(60000L, 180000L, 300000L)
 
         val isDarkMode = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
         val labelColor = if (isDarkMode) Color.WHITE else COLOR_ON_SURFACE_V
 
         for (i in 0..2) {
             val r = abilityRects[i]
-            val count = charges[i]
-            val on = count > 0
+            val on = if (isTimeAttack) timeLeftMillis > costs[i] else charges[i] > 0
+            
             bgP.color = if (on) Color.WHITE else 0x1A000000; bgP.style = Paint.Style.FILL
             canvas.drawRoundRect(r, 24f, 24f, bgP)
-            val progress = ((score - lasts[i]).toFloat() / steps[i]).coerceIn(0f, 1f)
-            if (progress > 0f && count < (if (i==2) 1 else 2)) {
-                bgP.color = COLOR_ABILITY_FILL
-                val fillH = r.height() * progress
-                tempRect.set(r.left, r.bottom - fillH, r.right, r.bottom)
-                canvas.save()
-                val path = Path(); path.addRoundRect(r, 24f, 24f, Path.Direction.CW)
-                canvas.clipPath(path)
-                canvas.drawRect(tempRect, bgP)
-                canvas.restore()
+            
+            if (!isTimeAttack) {
+                val progress = ((score - lasts[i]).toFloat() / steps[i]).coerceIn(0f, 1f)
+                if (progress > 0f && charges[i] < (if (i==2) 1 else 2)) {
+                    bgP.color = COLOR_ABILITY_FILL
+                    val fillH = r.height() * progress
+                    tempRect.set(r.left, r.bottom - fillH, r.right, r.bottom)
+                    canvas.save()
+                    val path = Path(); path.addRoundRect(r, 24f, 24f, Path.Direction.CW)
+                    canvas.clipPath(path)
+                    canvas.drawRect(tempRect, bgP)
+                    canvas.restore()
+                }
             }
+            
             iconP.alpha = 255
             iconP.color = if (on) COLOR_PRIMARY else 0x40000000; iconP.textSize = r.height() * 0.45f
 
@@ -716,12 +741,20 @@ class GameView @JvmOverloads constructor(
             } else {
                 canvas.drawText(icons[i], r.centerX(), r.centerY() + iconP.textSize * 0.35f, iconP)
             }
-            if (count > 0) {
+            
+            if (!isTimeAttack && charges[i] > 0) {
                 val badgeR = r.height() * 0.15f
                 bgP.color = COLOR_SECONDARY; canvas.drawCircle(r.right, r.top, badgeR, bgP)
                 lblP.color = Color.WHITE; lblP.textSize = badgeR * 1.5f; lblP.textAlign = Paint.Align.CENTER
-                canvas.drawText(count.toString(), r.right, r.top + lblP.textSize * 0.35f, lblP)
+                canvas.drawText(charges[i].toString(), r.right, r.top + lblP.textSize * 0.35f, lblP)
+            } else if (isTimeAttack) {
+                // Show cost in Time Attack
+                val costMin = (costs[i] / 60000).toInt()
+                lblP.color = if (on) Color.BLACK else Color.GRAY
+                lblP.textSize = r.height() * 0.2f
+                canvas.drawText("${costMin}m", r.centerX(), r.centerY() + r.height() * 0.35f, lblP)
             }
+            
             lblP.color = labelColor; lblP.alpha = 255; lblP.textSize = r.height() * 0.25f; lblP.textAlign = Paint.Align.CENTER
             canvas.drawText(labels[i], r.centerX(), r.bottom + lblP.textSize * 1.5f, lblP)
         }
@@ -937,16 +970,31 @@ class GameView @JvmOverloads constructor(
     }
 
     private fun checkAbilities() {
+        if (isTimeAttack) return
         while (score >= lastGravityEarnedAt + GRAVITY_STEP) { lastGravityEarnedAt += GRAVITY_STEP; if (gravityCharges < 2) gravityCharges++ }
         while (score >= lastTripleEarnedAt + TRIPLE_STEP) { lastTripleEarnedAt += TRIPLE_STEP; if (tripleCharges < 2) tripleCharges++ }
         while (score >= lastClearAllEarnedAt + CLEAR_ALL_STEP) { lastClearAllEarnedAt += CLEAR_ALL_STEP; if (clearAllCharges < 1) clearAllCharges++ }
     }
 
     private fun activateAbility(i: Int) {
-        when (i) {
-            0 -> if (gravityCharges > 0)  { applyGravityLoop(); gravityCharges--; vibrate(150) }
-            1 -> if (tripleCharges > 0)   { applyTriple();      tripleCharges--;  vibrate(150) }
-            2 -> if (clearAllCharges > 0) { clearAll();         clearAllCharges--; vibrate(250) }
+        if (isTimeAttack) {
+            val costs = listOf(60000L, 180000L, 300000L)
+            if (timeLeftMillis > costs[i]) {
+                timeLeftMillis -= costs[i]
+                when (i) {
+                    0 -> { applyGravityLoop(); vibrate(150) }
+                    1 -> { applyTriple();      vibrate(150) }
+                    2 -> { clearAll();         vibrate(250) }
+                }
+            } else {
+                return // Not enough time
+            }
+        } else {
+            when (i) {
+                0 -> if (gravityCharges > 0)  { applyGravityLoop(); gravityCharges--; vibrate(150) }
+                1 -> if (tripleCharges > 0)   { applyTriple();      tripleCharges--;  vibrate(150) }
+                2 -> if (clearAllCharges > 0) { clearAll();         clearAllCharges--; vibrate(250) }
+            }
         }
         updateRing(); saveBest(); post { evalGameOver() }; invalidate(); saveGameState()
     }

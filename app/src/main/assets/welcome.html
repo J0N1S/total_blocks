@@ -309,6 +309,18 @@
             </label>
         </div>
 
+        <div class="setting-row">
+            <div class="setting-label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                Animation
+            </div>
+            <label class="px-toggle">
+                <input type="checkbox" id="animationToggle" checked onchange="isAnimationEnabled=this.checked; Android&&Android.setAnimationEnabled(this.checked)">
+                <div class="px-track"></div>
+                <div class="px-thumb"></div>
+            </label>
+        </div>
+
         <div class="back-btn" onclick="showPage('mainMenu')">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
             Back
@@ -452,92 +464,105 @@
       [0,1,2,1,0]
     ], ['#8888cc','#555588']);
 
-    /* ── Canvas background ──────────────────────────────────────── */
-    var canvas = document.getElementById('bg-canvas');
-    var ctx = canvas.getContext('2d');
-    var BLOCK = 18, cols, rows, t = 0;
+        /* ── Canvas background ──────────────────────────────────────── */
+        var canvas = document.getElementById('bg-canvas');
+        var ctx = canvas.getContext('2d');
+        var BLOCK = 18, cols, rows, t = 0;
+        var isAnimationEnabled = true;
 
-    function noise(x, y, time) {
-      var n = 0;
-      n += Math.sin(x * 0.8 + time * 0.7) * Math.cos(y * 0.6 + time * 0.5) * 0.50;
-      n += Math.sin(x * 0.3 - time * 0.4 + y * 0.4) * 0.30;
-      n += Math.cos(x * 1.2 + y * 0.9   + time * 0.9) * 0.15;
-      n += Math.sin((x + y) * 0.5 + time * 0.3) * 0.10;
-      return (n + 1.0) / 2.0;
-    }
-    function terrainColor(v) {
-      v = Math.floor(v * 8) / 8;
-      var f, r, g, b;
-      if (v < 0.125)      { f=v/0.125;          r=5;  g=Math.round(8+f*12);   b=Math.round(30+f*40); }
-      else if (v < 0.25)  { f=(v-.125)/.125;    r=8;  g=Math.round(20+f*20);  b=Math.round(70+f*50); }
-      else if (v < 0.375) { f=(v-.25)/.125;     r=10; g=Math.round(40+f*30);  b=Math.round(120+f*50);}
-      else if (v < 0.5)   { f=(v-.375)/.125;    r=12; g=Math.round(70+f*40);  b=Math.round(170+f*30);}
-      else if (v < 0.625) { f=(v-.5)/.125;      r=15; g=Math.round(110+f*50); b=Math.round(200+f*20);}
-      else if (v < 0.75)  { f=(v-.625)/.125;    r=Math.round(15+f*15); g=Math.round(160+f*40); b=Math.round(220+f*10); }
-      else if (v < 0.875) { f=(v-.75)/.125;     r=Math.round(30+f*20); g=Math.round(200+f*30); b=230; }
-      else                { f=(v-.875)/.125;    r=Math.round(50+f*30); g=Math.round(230+f*20); b=Math.round(230-f*10); }
-      return 'rgb('+r+','+g+','+b+')';
-    }
-    function resize() {
-      canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-      cols = Math.ceil(canvas.width/BLOCK)+1; rows = Math.ceil(canvas.height/BLOCK)+1;
-    }
-    function draw() {
-      t += 0.022;
-      for (var row=0; row<rows; row++)
-        for (var col=0; col<cols; col++) {
-          ctx.fillStyle = terrainColor(noise(col*0.4, row*0.4, t));
-          ctx.fillRect(col*BLOCK, row*BLOCK, BLOCK, BLOCK);
+        function noise(x, y, time) {
+          var n = 0;
+          n += Math.sin(x * 0.8 + time * 0.7) * Math.cos(y * 0.6 + time * 0.5) * 0.50;
+          n += Math.sin(x * 0.3 - time * 0.4 + y * 0.4) * 0.30;
+          n += Math.cos(x * 1.2 + y * 0.9   + time * 0.9) * 0.15;
+          n += Math.sin((x + y) * 0.5 + time * 0.3) * 0.10;
+          return (n + 1.0) / 2.0;
         }
-      requestAnimationFrame(draw);
-    }
-    window.addEventListener('resize', resize);
-    resize(); draw();
+        function terrainColor(v) {
+          v = Math.floor(v * 8) / 8;
+          var f, r, g, b;
+          if (v < 0.125)      { f=v/0.125;          r=5;  g=Math.round(8+f*12);   b=Math.round(30+f*40); }
+          else if (v < 0.25)  { f=(v-.125)/.125;    r=8;  g=Math.round(20+f*20);  b=Math.round(70+f*50); }
+          else if (v < 0.375) { f=(v-.25)/.125;     r=10; g=Math.round(40+f*30);  b=Math.round(120+f*50);}
+          else if (v < 0.5)   { f=(v-.375)/.125;    r=12; g=Math.round(70+f*40);  b=Math.round(170+f*30);}
+          else if (v < 0.625) { f=(v-.5)/.125;      r=15; g=Math.round(110+f*50); b=Math.round(200+f*20);}
+          else if (v < 0.75)  { f=(v-.625)/.125;    r=Math.round(15+f*15); g=Math.round(160+f*40); b=Math.round(220+f*10); }
+          else if (v < 0.875) { f=(v-.75)/.125;     r=Math.round(30+f*20); g=Math.round(200+f*30); b=230; }
+          else                { f=(v-.875)/.125;    r=Math.round(50+f*30); g=Math.round(230+f*20); b=Math.round(230-f*10); }
+          return 'rgb('+r+','+g+','+b+')';
+        }
+        function resize() {
+          canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+          cols = Math.ceil(canvas.width/BLOCK)+1; rows = Math.ceil(canvas.height/BLOCK)+1;
+        }
+        function draw() {
+          if (!isAnimationEnabled) {
+              // Solid Indigo Green background
+              ctx.fillStyle = '#0a2e1d';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              requestAnimationFrame(draw);
+              return;
+          }
+          t += 0.022;
+          for (var row=0; row<rows; row++)
+            for (var col=0; col<cols; col++) {
+              ctx.fillStyle = terrainColor(noise(col*0.4, row*0.4, t));
+              ctx.fillRect(col*BLOCK, row*BLOCK, BLOCK, BLOCK);
+            }
+          requestAnimationFrame(draw);
+        }
+        window.addEventListener('resize', resize);
+        resize(); draw();
 
-    /* ── Menu logic ─────────────────────────────────────────────── */
-    var isCurrentlyInGame = false;
-    function showPage(id) {
-      document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
-      document.getElementById(id).classList.add('active');
-    }
-    function goHome() {
-      isCurrentlyInGame = false;
-      showPage('mainMenu');
-      updateUI();
-    }
-    function setIsInGame(v) {
-      isCurrentlyInGame = v;
-      showPage('mainMenu');
-      updateUI();
-    }
-    function setHasSavedGame(v) {
-      var el = document.getElementById('welcomeResume');
-      el.classList.toggle('visible', !!v);
-    }
-    function updateUI() {
-      document.getElementById('inGameView').style.display  = isCurrentlyInGame ? 'block' : 'none';
-      document.getElementById('welcomeView').style.display = isCurrentlyInGame ? 'none'  : 'block';
-      document.getElementById('logoSub').textContent = isCurrentlyInGame ? '— paused —' : 'puzzle game';
-      if (!isCurrentlyInGame && typeof Android!=='undefined' && Android.requestSavedGameState)
-        Android.requestSavedGameState();
-    }
-    function showGameOver(score, subtitle) {
-      showPage('gameOverPage');
-      if (score !== undefined) document.getElementById('finalScore').textContent = score;
-      if (subtitle) document.getElementById('gameOverSub').textContent = subtitle;
-    }
+        /* ── Menu logic ─────────────────────────────────────────────── */
+        var isCurrentlyInGame = false;
+        function showPage(id) {
+          document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
+          document.getElementById(id).classList.add('active');
+        }
+        function goHome() {
+          isCurrentlyInGame = false;
+          showPage('mainMenu');
+          updateUI();
+        }
+        function setIsInGame(v) {
+          isCurrentlyInGame = v;
+          showPage('mainMenu');
+          updateUI();
+        }
+        function setHasSavedGame(v) {
+          var el = document.getElementById('welcomeResume');
+          el.classList.toggle('visible', !!v);
+        }
+        function updateUI() {
+          document.getElementById('inGameView').style.display  = isCurrentlyInGame ? 'block' : 'none';
+          document.getElementById('welcomeView').style.display = isCurrentlyInGame ? 'none'  : 'block';
+          document.getElementById('logoSub').textContent = isCurrentlyInGame ? '— paused —' : 'puzzle game';
+          if (!isCurrentlyInGame && typeof Android!=='undefined' && Android.requestSavedGameState)
+            Android.requestSavedGameState();
+        }
+        function showGameOver(score, subtitle) {
+          showPage('gameOverPage');
+          if (score !== undefined) document.getElementById('finalScore').textContent = score;
+          if (subtitle) document.getElementById('gameOverSub').textContent = subtitle;
+        }
 
-    function setToggleState(type, enabled) {
-      if (type==='vibration') document.getElementById('vibrationToggle').checked = enabled;
-      else if (type==='sound') document.getElementById('soundToggle').checked = enabled;
-    }
-    function onMenuOpen() {
-      if (typeof Android !== 'undefined') {
-        if (Android.requestVibrationState) Android.requestVibrationState();
-        if (Android.requestSoundState)     Android.requestSoundState();
-        if (!isCurrentlyInGame && Android.requestSavedGameState) Android.requestSavedGameState();
-      }
-    }
+        function setToggleState(type, enabled) {
+          if (type==='vibration') document.getElementById('vibrationToggle').checked = enabled;
+          else if (type==='sound') document.getElementById('soundToggle').checked = enabled;
+          else if (type==='animation') {
+              document.getElementById('animationToggle').checked = enabled;
+              isAnimationEnabled = enabled;
+          }
+        }
+        function onMenuOpen() {
+          if (typeof Android !== 'undefined') {
+            if (Android.requestVibrationState) Android.requestVibrationState();
+            if (Android.requestSoundState)     Android.requestSoundState();
+            if (Android.requestAnimationState) Android.requestAnimationState();
+            if (!isCurrentlyInGame && Android.requestSavedGameState) Android.requestSavedGameState();
+          }
+        }
     window.onload = onMenuOpen;
     document.addEventListener('touchmove', function(e){ e.preventDefault(); }, { passive: false });
 </script>

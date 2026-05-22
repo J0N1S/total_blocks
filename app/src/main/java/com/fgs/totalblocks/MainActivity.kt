@@ -117,6 +117,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     syncVibrationState()
                     syncSoundState()
+                    syncAnimationState()
                 }
             }
             webChromeClient = WebChromeClient()
@@ -152,6 +153,11 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 @android.webkit.JavascriptInterface
+                fun setAnimationEnabled(enabled: Boolean) = runOnUiThread {
+                    gameView.isAnimationEnabled = enabled
+                }
+
+                @android.webkit.JavascriptInterface
                 fun requestVibrationState() = runOnUiThread {
                     syncVibrationState()
                 }
@@ -159,6 +165,11 @@ class MainActivity : AppCompatActivity() {
                 @android.webkit.JavascriptInterface
                 fun requestSoundState() = runOnUiThread {
                     syncSoundState()
+                }
+
+                @android.webkit.JavascriptInterface
+                fun requestAnimationState() = runOnUiThread {
+                    syncAnimationState()
                 }
 
                 @android.webkit.JavascriptInterface
@@ -182,6 +193,11 @@ class MainActivity : AppCompatActivity() {
         menuWebView?.evaluateJavascript("setToggleState('sound', $state)", null)
     }
 
+    private fun syncAnimationState() {
+        val state = gameView.isAnimationEnabled
+        menuWebView?.evaluateJavascript("setToggleState('animation', $state)", null)
+    }
+
     private fun showMenu(isInGame: Boolean) {
         if (menuDialog == null) {
             menuDialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
@@ -193,6 +209,7 @@ class MainActivity : AppCompatActivity() {
         
         syncVibrationState()
         syncSoundState()
+        syncAnimationState()
         
         // Pass the state to JS
         menuWebView?.evaluateJavascript("setIsInGame($isInGame)", null)
